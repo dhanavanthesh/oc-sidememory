@@ -38,6 +38,39 @@ pub struct RuntimeLimits {
     pub max_events_per_byte: usize,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GuideLimits {
+    pub max_rollback_tokens: usize,
+    pub max_journal_records: usize,
+    pub max_history_items: usize,
+    pub max_histories: usize,
+    pub max_history_bucket_entries: usize,
+    pub max_retained_rollback_bytes: usize,
+    pub max_mask_words: usize,
+    pub max_candidates_per_mask: usize,
+    pub max_candidate_bytes_per_mask: usize,
+    pub max_equality_checks_per_mask: usize,
+    pub max_debug_trace_tokens: usize,
+}
+
+impl Default for GuideLimits {
+    fn default() -> Self {
+        Self {
+            max_rollback_tokens: 32,
+            max_journal_records: 1_000_000,
+            max_history_items: 1_000_000,
+            max_histories: 4096,
+            max_history_bucket_entries: 1_000_000,
+            max_retained_rollback_bytes: 64 << 20,
+            max_mask_words: 1_000_000_usize.div_ceil(32),
+            max_candidates_per_mask: 1_000_000,
+            max_candidate_bytes_per_mask: 64 << 20,
+            max_equality_checks_per_mask: 1_000_000,
+            max_debug_trace_tokens: 1_000_000,
+        }
+    }
+}
+
 impl Default for RuntimeLimits {
     fn default() -> Self {
         Self {

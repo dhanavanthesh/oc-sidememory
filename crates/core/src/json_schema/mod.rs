@@ -315,8 +315,8 @@ mod tests {
             (
                 r#"{"title": "Foo", "type": "number"}"#,
                 NUMBER,
-                vec!["1", "0", "1.3", "-1.3", "1.3e+9"],
-                vec!["01", ".3", "1.3e9"],
+                vec!["1", "0", "1.3", "-1.3", "1.3e+9", "1.3e9"],
+                vec!["01", ".3", "1.3e"],
             ),
             // Required number property
             (
@@ -1262,7 +1262,13 @@ mod tests {
             ),
         ] {
             let result = regex_from_str(schema, None, None).expect("To regex failed");
-            assert_eq!(result, regex, "JSON Schema {} didn't match", schema);
+            let expected = regex
+                .replace("[eE][+-][0-9]", "[eE][+-]?[0-9]")
+                .replace(
+                    r#"|\\["\\/bfnrt])"#,
+                    r#"|\\["\\/bfnrt]|\\u[0-9a-fA-F]{4})"#,
+                );
+            assert_eq!(result, expected, "JSON Schema {} didn't match", schema);
 
             let re = Regex::new(&result).expect("Regex failed");
             for m in a_match {

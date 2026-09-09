@@ -49,6 +49,7 @@ pub struct CompiledSchema {
     ir: SchemaIr,
     regular_plan: Box<str>,
     serialization_policy: SerializationPolicy,
+    runtime_limits: RuntimeLimits,
 }
 
 impl CompiledSchema {
@@ -74,6 +75,10 @@ impl CompiledSchema {
 
     pub fn serialization_policy(&self) -> SerializationPolicy {
         self.serialization_policy
+    }
+
+    pub fn runtime_limits(&self) -> &RuntimeLimits {
+        &self.runtime_limits
     }
 }
 
@@ -120,6 +125,7 @@ pub fn compile_schema(
         ir,
         regular_plan: regular_plan.into_boxed_str(),
         serialization_policy: options.serialization_policy,
+        runtime_limits: options.runtime_limits.clone(),
     })
 }
 

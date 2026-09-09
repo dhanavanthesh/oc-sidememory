@@ -92,4 +92,5 @@ pub mod vocabulary;
 
 pub use error::{Error, Result};
 pub use json_schema::compile::{compile_schema, CompileOptions, CompiledSchema};
+pub use sidememory::{Guide, GuideError, GuideOptions};
 pub use vocabulary::Vocabulary;

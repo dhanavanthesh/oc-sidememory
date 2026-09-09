@@ -1,14 +1,15 @@
 use std::collections::HashSet;
+use std::mem::size_of;
 
 use thiserror::Error;
 
 use crate::primitives::TokenId;
 
-use super::canonical::{ArenaError, CanonicalArena};
+use super::canonical::{ArenaError, ArenaMark, CanonicalArena};
 use super::event::JsonEvent;
-use super::limits::RuntimeLimits;
+use super::limits::{ResourceError, RuntimeLimits};
 use super::number::{CanonicalNumber, NumberError};
-use super::scope::{FrameId, FrameSlots, ScopeError};
+use super::scope::{FrameId, FrameSlotUndo, FrameSlots, ScopeError};
 use super::token_table::{TokenTable, VocabularyError};
 use super::value::CanonicalId;
 
@@ -82,6 +83,7 @@ pub struct JsonCursor {
     limits: RuntimeLimits,
 }
 
+#[derive(Debug)]
 enum CursorFrame {
     Array {
         id: FrameId,
@@ -93,6 +95,194 @@ enum CursorFrame {
         values: Vec<(Vec<u8>, CanonicalId)>,
         seen_keys: HashSet<Vec<u8>>,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CursorJournalMark {
+    undo_len: usize,
+    arena_mark: ArenaMark,
+}
+
+#[derive(Debug)]
+pub struct CursorJournal {
+    undo: Vec<CursorUndo>,
+    max_records: usize,
+}
+
+#[derive(Debug)]
+enum CursorUndo {
+    RestoreCore {
+        mode: CursorMode,
+        root: Option<CanonicalId>,
+        utf8: Utf8State,
+        terminated: bool,
+        byte_offset: usize,
+    },
+    TruncatePartial(usize),
+    RestorePartial(Vec<u8>),
+    PopOpenedFrame(FrameSlotUndo),
+    RestoreClosedFrame(CursorFrame, FrameSlotUndo),
+    UndoObjectKey(FrameId),
+    PopArrayValue(FrameId),
+    PopObjectValue(FrameId),
+}
+
+impl CursorJournal {
+    pub fn new(max_records: usize) -> Self {
+        Self {
+            undo: Vec::new(),
+            max_records,
+        }
+    }
+
+    pub fn mark(&self, cursor: &JsonCursor) -> CursorJournalMark {
+        CursorJournalMark {
+            undo_len: self.undo.len(),
+            arena_mark: cursor.arena.mark(),
+        }
+    }
+
+    fn push(&mut self, undo: CursorUndo) -> Result<(), CursorError> {
+        let requested = self
+            .undo
+            .len()
+            .checked_add(1)
+            .ok_or(CursorError::OffsetOverflow)?;
+        if requested > self.max_records {
+            return Err(CursorError::JournalLimit {
+                limit: self.max_records,
+            });
+        }
+        if self.undo.len() == self.undo.capacity() {
+            self.undo
+                .try_reserve_exact(1)
+                .map_err(|_| CursorError::Allocation)?;
+        }
+        self.undo.push(undo);
+        Ok(())
+    }
+
+    fn preflight(&mut self, additional: usize) -> Result<(), CursorError> {
+        let requested = self
+            .undo
+            .len()
+            .checked_add(additional)
+            .ok_or(CursorError::OffsetOverflow)?;
+        if requested > self.max_records {
+            return Err(CursorError::JournalLimit {
+                limit: self.max_records,
+            });
+        }
+        self.undo
+            .try_reserve_exact(additional)
+            .map_err(|_| CursorError::Allocation)
+    }
+
+    pub(crate) fn discard_prefix(&mut self, count: usize) -> Result<(), CursorError> {
+        if count > self.undo.len() {
+            return Err(CursorError::InvalidJournalMark);
+        }
+        self.undo.drain(..count);
+        Ok(())
+    }
+
+    pub(crate) fn undo_len(&self) -> usize {
+        self.undo.len()
+    }
+
+    pub(crate) fn retained_bytes_from(&self, start: usize) -> Result<usize, ResourceError> {
+        let records = self
+            .undo
+            .get(start..)
+            .ok_or(ResourceError::ArithmeticOverflow {
+                context: "cursor journal retained range",
+            })?;
+        let base = records.len().checked_mul(size_of::<CursorUndo>()).ok_or(
+            ResourceError::ArithmeticOverflow {
+                context: "cursor journal retained bytes",
+            },
+        )?;
+        records.iter().try_fold(base, |total, undo| {
+            let dynamic = match undo {
+                CursorUndo::RestorePartial(bytes) => bytes.capacity(),
+                CursorUndo::RestoreClosedFrame(frame, _) => frame.retained_bytes()?,
+                _ => 0,
+            };
+            total
+                .checked_add(dynamic)
+                .ok_or(ResourceError::ArithmeticOverflow {
+                    context: "cursor journal retained bytes",
+                })
+        })
+    }
+}
+
+impl CursorFrame {
+    fn retained_bytes(&self) -> Result<usize, ResourceError> {
+        match self {
+            Self::Array { values, .. } => values
+                .capacity()
+                .checked_mul(size_of::<CanonicalId>())
+                .ok_or(ResourceError::ArithmeticOverflow {
+                    context: "retained array frame",
+                }),
+            Self::Object {
+                current_key,
+                values,
+                seen_keys,
+                ..
+            } => {
+                let mut total = values
+                    .capacity()
+                    .checked_mul(size_of::<(Vec<u8>, CanonicalId)>())
+                    .and_then(|bytes| {
+                        seen_keys
+                            .capacity()
+                            .checked_mul(size_of::<Vec<u8>>())
+                            .and_then(|keys| bytes.checked_add(keys))
+                    })
+                    .ok_or(ResourceError::ArithmeticOverflow {
+                        context: "retained object frame",
+                    })?;
+                if let Some(key) = current_key {
+                    total = total.checked_add(key.capacity()).ok_or(
+                        ResourceError::ArithmeticOverflow {
+                            context: "retained object key",
+                        },
+                    )?;
+                }
+                for (key, _) in values {
+                    total = total.checked_add(key.capacity()).ok_or(
+                        ResourceError::ArithmeticOverflow {
+                            context: "retained object keys",
+                        },
+                    )?;
+                }
+                for key in seen_keys {
+                    total = total.checked_add(key.capacity()).ok_or(
+                        ResourceError::ArithmeticOverflow {
+                            context: "retained seen object keys",
+                        },
+                    )?;
+                }
+                Ok(total)
+            }
+        }
+    }
+}
+
+impl CursorJournalMark {
+    pub(crate) fn undo_len(self) -> usize {
+        self.undo_len
+    }
+
+    pub(crate) fn shift(&mut self, count: usize) -> Result<(), CursorError> {
+        self.undo_len = self
+            .undo_len
+            .checked_sub(count)
+            .ok_or(CursorError::InvalidJournalMark)?;
+        Ok(())
+    }
 }
 
 impl JsonCursor {
@@ -133,15 +323,38 @@ impl JsonCursor {
     }
 
     pub fn feed_byte(&mut self, byte: u8) -> Result<Vec<JsonEvent>, CursorError> {
+        let mut journal = CursorJournal::new(usize::MAX);
+        let mark = journal.mark(self);
+        let mut events = Vec::new();
+        if let Err(error) = self.feed_byte_into(byte, &mut events, &mut journal) {
+            self.restore(mark, &mut journal)?;
+            return Err(error);
+        }
+        Ok(events)
+    }
+
+    pub fn feed_byte_into(
+        &mut self,
+        byte: u8,
+        events: &mut Vec<JsonEvent>,
+        journal: &mut CursorJournal,
+    ) -> Result<(), CursorError> {
         if self.terminated {
             return Err(CursorError::AlreadyTerminated);
         }
+        journal.preflight(16)?;
+        journal.push(CursorUndo::RestoreCore {
+            mode: self.mode.clone(),
+            root: self.root,
+            utf8: self.utf8,
+            terminated: self.terminated,
+            byte_offset: self.byte_offset,
+        })?;
         let offset = self.byte_offset;
         self.byte_offset = self
             .byte_offset
             .checked_add(1)
             .ok_or(CursorError::OffsetOverflow)?;
-        let mut events = Vec::new();
         let mut reprocess = true;
         while reprocess {
             reprocess = false;
@@ -151,9 +364,9 @@ impl JsonCursor {
                         continue;
                     }
                     if matches!(self.mode, CursorMode::ExpectArrayValueOrEnd) && byte == b']' {
-                        self.close_array(&mut events)?;
+                        self.close_array(events, journal)?;
                     } else {
-                        self.start_value(byte, &mut events, offset)?;
+                        self.start_value(byte, events, journal, offset)?;
                     }
                 }
                 CursorMode::ExpectObjectKeyOrEnd => {
@@ -161,8 +374,8 @@ impl JsonCursor {
                         continue;
                     }
                     match byte {
-                        b'}' => self.close_object(&mut events)?,
-                        b'"' => self.begin_string(StringContext::Key)?,
+                        b'}' => self.close_object(events, journal)?,
+                        b'"' => self.begin_string(StringContext::Key, journal)?,
                         _ => return Err(self.syntax(offset, "expected object key or '}'")),
                     }
                 }
@@ -181,7 +394,7 @@ impl JsonCursor {
                     }
                     match byte {
                         b',' => self.mode = CursorMode::ExpectValue,
-                        b']' => self.close_array(&mut events)?,
+                        b']' => self.close_array(events, journal)?,
                         _ => return Err(self.syntax(offset, "expected ',' or ']'")),
                     }
                 }
@@ -191,7 +404,7 @@ impl JsonCursor {
                     }
                     match byte {
                         b',' => self.mode = CursorMode::ExpectObjectKeyOrEnd,
-                        b'}' => self.close_object(&mut events)?,
+                        b'}' => self.close_object(events, journal)?,
                         _ => return Err(self.syntax(offset, "expected ',' or '}'")),
                     }
                 }
@@ -202,7 +415,7 @@ impl JsonCursor {
                     self.mode = CursorMode::CompleteRoot;
                 }
                 CursorMode::InString(context) => match byte {
-                    b'"' => self.finish_string(context, &mut events)?,
+                    b'"' => self.finish_string(context, events, journal)?,
                     b'\\' if self.utf8.expected_continuations == 0 => {
                         self.mode = CursorMode::AfterBackslash(context)
                     }
@@ -212,19 +425,19 @@ impl JsonCursor {
                             byte_offset: offset,
                             reason,
                         })?;
-                        self.push_partial(byte)?;
+                        self.push_partial(byte, journal)?;
                     }
                 },
                 CursorMode::AfterBackslash(context) => match byte {
                     b'"' | b'\\' | b'/' => {
-                        self.push_partial(byte)?;
+                        self.push_partial(byte, journal)?;
                         self.mode = CursorMode::InString(context);
                     }
-                    b'b' => self.finish_simple_escape(context, 0x08)?,
-                    b'f' => self.finish_simple_escape(context, 0x0c)?,
-                    b'n' => self.finish_simple_escape(context, b'\n')?,
-                    b'r' => self.finish_simple_escape(context, b'\r')?,
-                    b't' => self.finish_simple_escape(context, b'\t')?,
+                    b'b' => self.finish_simple_escape(context, 0x08, journal)?,
+                    b'f' => self.finish_simple_escape(context, 0x0c, journal)?,
+                    b'n' => self.finish_simple_escape(context, b'\n', journal)?,
+                    b'r' => self.finish_simple_escape(context, b'\r', journal)?,
+                    b't' => self.finish_simple_escape(context, b'\t', journal)?,
                     b'u' => {
                         self.mode = CursorMode::InUnicodeEscape {
                             context,
@@ -252,7 +465,7 @@ impl JsonCursor {
                         } else if (0xdc00..=0xdfff).contains(&value) {
                             return Err(self.syntax(offset, "isolated low surrogate"));
                         } else {
-                            self.push_codepoint(u32::from(value))?;
+                            self.push_codepoint(u32::from(value), journal)?;
                             self.mode = CursorMode::InString(context);
                         }
                     } else {
@@ -296,7 +509,7 @@ impl JsonCursor {
                                 + ((u32::from(high) - 0xd800) << 10)
                                 + (u32::from(low) - 0xdc00);
                             self.utf8.codepoint = 0;
-                            self.push_codepoint(codepoint)?;
+                            self.push_codepoint(codepoint, journal)?;
                             self.mode = CursorMode::InString(context);
                         } else {
                             self.mode = CursorMode::WaitingLowSurrogate {
@@ -310,12 +523,12 @@ impl JsonCursor {
                 },
                 CursorMode::InNumber => {
                     if is_number_byte(byte) {
-                        self.push_partial(byte)?;
+                        self.push_partial(byte, journal)?;
                         if !number_prefix_valid(&self.partial) {
                             return Err(self.syntax(offset, "invalid number"));
                         }
                     } else if is_delimiter(byte) && number_complete(&self.partial) {
-                        self.seal_number(&mut events)?;
+                        self.seal_number(events, journal)?;
                         reprocess = true;
                     } else {
                         return Err(self.syntax(offset, "invalid number continuation"));
@@ -324,32 +537,26 @@ impl JsonCursor {
                 CursorMode::InTrue { matched } => {
                     reprocess = self.feed_literal(
                         byte,
-                        b"true",
                         matched,
                         Literal::Bool(true),
-                        &mut events,
+                        events,
+                        journal,
                         offset,
                     )?;
                 }
                 CursorMode::InFalse { matched } => {
                     reprocess = self.feed_literal(
                         byte,
-                        b"false",
                         matched,
                         Literal::Bool(false),
-                        &mut events,
+                        events,
+                        journal,
                         offset,
                     )?;
                 }
                 CursorMode::InNull { matched } => {
-                    reprocess = self.feed_literal(
-                        byte,
-                        b"null",
-                        matched,
-                        Literal::Null,
-                        &mut events,
-                        offset,
-                    )?;
+                    reprocess =
+                        self.feed_literal(byte, matched, Literal::Null, events, journal, offset)?;
                 }
             }
             if events.len() > self.limits.max_events_per_byte {
@@ -359,25 +566,49 @@ impl JsonCursor {
                 });
             }
         }
-        Ok(events)
+        Ok(())
     }
 
     pub fn finish_eos(&mut self) -> Result<Vec<JsonEvent>, CursorError> {
+        let mut journal = CursorJournal::new(usize::MAX);
+        let mark = journal.mark(self);
+        let mut events = Vec::new();
+        if let Err(error) = self.finish_eos_into(&mut events, &mut journal) {
+            self.restore(mark, &mut journal)?;
+            return Err(error);
+        }
+        Ok(events)
+    }
+
+    pub fn finish_eos_into(
+        &mut self,
+        events: &mut Vec<JsonEvent>,
+        journal: &mut CursorJournal,
+    ) -> Result<(), CursorError> {
         if self.terminated {
             return Err(CursorError::AlreadyTerminated);
         }
-        let mut events = Vec::new();
+        journal.preflight(8)?;
+        journal.push(CursorUndo::RestoreCore {
+            mode: self.mode.clone(),
+            root: self.root,
+            utf8: self.utf8,
+            terminated: self.terminated,
+            byte_offset: self.byte_offset,
+        })?;
         match self.mode {
             CursorMode::InNumber if number_complete(&self.partial) => {
-                self.seal_number(&mut events)?
+                self.seal_number(events, journal)?
             }
             CursorMode::InTrue { matched: 4 } => {
-                self.seal_literal(Literal::Bool(true), &mut events)?
+                self.seal_literal(Literal::Bool(true), events, journal)?
             }
             CursorMode::InFalse { matched: 5 } => {
-                self.seal_literal(Literal::Bool(false), &mut events)?
+                self.seal_literal(Literal::Bool(false), events, journal)?
             }
-            CursorMode::InNull { matched: 4 } => self.seal_literal(Literal::Null, &mut events)?,
+            CursorMode::InNull { matched: 4 } => {
+                self.seal_literal(Literal::Null, events, journal)?
+            }
             CursorMode::CompleteRoot => {}
             _ => {
                 return Err(CursorError::IncompleteDocument {
@@ -394,7 +625,95 @@ impl JsonCursor {
             });
         }
         self.terminated = true;
-        Ok(events)
+        Ok(())
+    }
+
+    pub fn restore(
+        &mut self,
+        mark: CursorJournalMark,
+        journal: &mut CursorJournal,
+    ) -> Result<(), CursorError> {
+        if mark.undo_len > journal.undo.len() {
+            return Err(CursorError::InvalidJournalMark);
+        }
+        while journal.undo.len() > mark.undo_len {
+            let undo = journal.undo.pop().ok_or(CursorError::InvalidJournalMark)?;
+            match undo {
+                CursorUndo::RestoreCore {
+                    mode,
+                    root,
+                    utf8,
+                    terminated,
+                    byte_offset,
+                } => {
+                    self.mode = mode;
+                    self.root = root;
+                    self.utf8 = utf8;
+                    self.terminated = terminated;
+                    self.byte_offset = byte_offset;
+                }
+                CursorUndo::TruncatePartial(len) => {
+                    if len > self.partial.len() {
+                        return Err(CursorError::InvalidJournalMark);
+                    }
+                    self.partial.truncate(len);
+                }
+                CursorUndo::RestorePartial(partial) => self.partial = partial,
+                CursorUndo::PopOpenedFrame(slot) => {
+                    self.frames.pop().ok_or(CursorError::InvalidJournalMark)?;
+                    self.slots.undo(slot)?;
+                }
+                CursorUndo::RestoreClosedFrame(frame, slot) => {
+                    self.slots.undo(slot)?;
+                    self.frames.push(frame);
+                }
+                CursorUndo::UndoObjectKey(frame) => {
+                    let Some(CursorFrame::Object {
+                        id,
+                        current_key,
+                        seen_keys,
+                        ..
+                    }) = self.frames.last_mut()
+                    else {
+                        return Err(CursorError::InvalidJournalMark);
+                    };
+                    if *id != frame {
+                        return Err(CursorError::InvalidJournalMark);
+                    }
+                    let key = current_key.take().ok_or(CursorError::InvalidJournalMark)?;
+                    if !seen_keys.remove(&key) {
+                        return Err(CursorError::InvalidJournalMark);
+                    }
+                    self.partial = key;
+                }
+                CursorUndo::PopArrayValue(frame) => {
+                    let Some(CursorFrame::Array { id, values }) = self.frames.last_mut() else {
+                        return Err(CursorError::InvalidJournalMark);
+                    };
+                    if *id != frame || values.pop().is_none() {
+                        return Err(CursorError::InvalidJournalMark);
+                    }
+                }
+                CursorUndo::PopObjectValue(frame) => {
+                    let Some(CursorFrame::Object {
+                        id,
+                        current_key,
+                        values,
+                        ..
+                    }) = self.frames.last_mut()
+                    else {
+                        return Err(CursorError::InvalidJournalMark);
+                    };
+                    if *id != frame || current_key.is_some() {
+                        return Err(CursorError::InvalidJournalMark);
+                    }
+                    let (key, _) = values.pop().ok_or(CursorError::InvalidJournalMark)?;
+                    *current_key = Some(key);
+                }
+            }
+        }
+        self.arena.restore(mark.arena_mark)?;
+        Ok(())
     }
 
     pub fn snapshot(&self) -> CursorSnapshot {
@@ -420,15 +739,18 @@ impl JsonCursor {
         &mut self,
         byte: u8,
         events: &mut Vec<JsonEvent>,
+        journal: &mut CursorJournal,
         offset: usize,
     ) -> Result<(), CursorError> {
         match byte {
-            b'[' => self.open_array(events),
-            b'{' => self.open_object(events),
-            b'"' => self.begin_string(StringContext::Value),
+            b'[' => self.open_array(events, journal),
+            b'{' => self.open_object(events, journal),
+            b'"' => self.begin_string(StringContext::Value, journal),
             b'-' | b'0'..=b'9' => {
-                self.partial.clear();
-                self.push_partial(byte)?;
+                journal.push(CursorUndo::RestorePartial(std::mem::take(
+                    &mut self.partial,
+                )))?;
+                self.push_partial(byte, journal)?;
                 self.mode = CursorMode::InNumber;
                 Ok(())
             }
@@ -448,60 +770,98 @@ impl JsonCursor {
         }
     }
 
-    fn open_array(&mut self, events: &mut Vec<JsonEvent>) -> Result<(), CursorError> {
+    fn open_array(
+        &mut self,
+        events: &mut Vec<JsonEvent>,
+        journal: &mut CursorJournal,
+    ) -> Result<(), CursorError> {
         self.preflight_depth()?;
-        let id = self.slots.allocate()?;
+        journal.push(CursorUndo::TruncatePartial(self.partial.len()))?;
+        let (id, slot_undo) = self.slots.allocate_with_undo()?;
         self.frames.push(CursorFrame::Array {
             id,
             values: Vec::new(),
         });
+        journal.push(CursorUndo::PopOpenedFrame(slot_undo))?;
         self.mode = CursorMode::ExpectArrayValueOrEnd;
         events.push(JsonEvent::ArrayStart(id));
         Ok(())
     }
 
-    fn open_object(&mut self, events: &mut Vec<JsonEvent>) -> Result<(), CursorError> {
+    fn open_object(
+        &mut self,
+        events: &mut Vec<JsonEvent>,
+        journal: &mut CursorJournal,
+    ) -> Result<(), CursorError> {
         self.preflight_depth()?;
-        let id = self.slots.allocate()?;
+        let (id, slot_undo) = self.slots.allocate_with_undo()?;
         self.frames.push(CursorFrame::Object {
             id,
             current_key: None,
             values: Vec::new(),
             seen_keys: HashSet::new(),
         });
+        journal.push(CursorUndo::PopOpenedFrame(slot_undo))?;
         self.mode = CursorMode::ExpectObjectKeyOrEnd;
         events.push(JsonEvent::ObjectStart(id));
         Ok(())
     }
 
-    fn close_array(&mut self, events: &mut Vec<JsonEvent>) -> Result<(), CursorError> {
-        let Some(CursorFrame::Array { id, values }) = self.frames.pop() else {
+    fn close_array(
+        &mut self,
+        events: &mut Vec<JsonEvent>,
+        journal: &mut CursorJournal,
+    ) -> Result<(), CursorError> {
+        let Some(CursorFrame::Array { id, values }) = self.frames.last() else {
             return Err(self.syntax(self.byte_offset.saturating_sub(1), "mismatched ']'"));
         };
-        let value = self.arena.add_array(&values)?;
-        self.slots.release(id)?;
+        let value = self.arena.add_array(values)?;
+        journal.push(CursorUndo::TruncatePartial(self.partial.len()))?;
+        let slot_undo = self.slots.release_with_undo(*id)?;
+        let frame = self
+            .frames
+            .pop()
+            .ok_or(CursorError::Internal("missing array frame"))?;
+        let id = frame.id();
+        journal.push(CursorUndo::RestoreClosedFrame(frame, slot_undo))?;
         events.push(JsonEvent::ArrayEnd { frame: id, value });
-        self.publish_value(value, events)
+        self.publish_value(value, events, journal)
     }
 
-    fn close_object(&mut self, events: &mut Vec<JsonEvent>) -> Result<(), CursorError> {
-        let Some(CursorFrame::Object {
-            id,
-            current_key: _,
-            values,
-            seen_keys: _,
-        }) = self.frames.pop()
-        else {
+    fn close_object(
+        &mut self,
+        events: &mut Vec<JsonEvent>,
+        journal: &mut CursorJournal,
+    ) -> Result<(), CursorError> {
+        let Some(CursorFrame::Object { id, values, .. }) = self.frames.last() else {
             return Err(self.syntax(self.byte_offset.saturating_sub(1), "mismatched '}'"));
         };
-        let value = self.arena.add_object(values)?;
-        self.slots.release(id)?;
+        let mut owned_values = Vec::new();
+        owned_values
+            .try_reserve_exact(values.len())
+            .map_err(|_| CursorError::Allocation)?;
+        owned_values.extend(values.iter().cloned());
+        let value = self.arena.add_object(owned_values)?;
+        journal.push(CursorUndo::TruncatePartial(self.partial.len()))?;
+        let slot_undo = self.slots.release_with_undo(*id)?;
+        let frame = self
+            .frames
+            .pop()
+            .ok_or(CursorError::Internal("missing object frame"))?;
+        let id = frame.id();
+        journal.push(CursorUndo::RestoreClosedFrame(frame, slot_undo))?;
         events.push(JsonEvent::ObjectEnd { frame: id, value });
-        self.publish_value(value, events)
+        self.publish_value(value, events, journal)
     }
 
-    fn begin_string(&mut self, context: StringContext) -> Result<(), CursorError> {
-        self.partial.clear();
+    fn begin_string(
+        &mut self,
+        context: StringContext,
+        journal: &mut CursorJournal,
+    ) -> Result<(), CursorError> {
+        journal.push(CursorUndo::RestorePartial(std::mem::take(
+            &mut self.partial,
+        )))?;
         self.utf8 = Utf8State::default();
         self.mode = CursorMode::InString(context);
         Ok(())
@@ -511,6 +871,7 @@ impl JsonCursor {
         &mut self,
         context: StringContext,
         events: &mut Vec<JsonEvent>,
+        journal: &mut CursorJournal,
     ) -> Result<(), CursorError> {
         if self.utf8.expected_continuations != 0 {
             return Err(self.syntax(
@@ -519,6 +880,12 @@ impl JsonCursor {
             ));
         }
         if context == StringContext::Key {
+            journal.push(CursorUndo::UndoObjectKey(
+                self.frames
+                    .last()
+                    .ok_or(CursorError::Internal("missing object frame"))?
+                    .id(),
+            ))?;
             let key = std::mem::take(&mut self.partial);
             let Some(CursorFrame::Object {
                 id,
@@ -540,28 +907,35 @@ impl JsonCursor {
             return Ok(());
         }
         let value = self.arena.add_string(&self.partial)?;
-        self.partial.clear();
+        journal.push(CursorUndo::RestorePartial(std::mem::take(
+            &mut self.partial,
+        )))?;
         events.push(JsonEvent::ScalarSealed(value));
-        self.publish_value(value, events)
+        self.publish_value(value, events, journal)
     }
 
     fn finish_simple_escape(
         &mut self,
         context: StringContext,
         byte: u8,
+        journal: &mut CursorJournal,
     ) -> Result<(), CursorError> {
-        self.push_partial(byte)?;
+        self.push_partial(byte, journal)?;
         self.mode = CursorMode::InString(context);
         Ok(())
     }
 
-    fn push_codepoint(&mut self, codepoint: u32) -> Result<(), CursorError> {
+    fn push_codepoint(
+        &mut self,
+        codepoint: u32,
+        journal: &mut CursorJournal,
+    ) -> Result<(), CursorError> {
         let character =
             char::from_u32(codepoint).ok_or(CursorError::Internal("invalid Unicode scalar"))?;
         let mut bytes = [0; 4];
         let encoded = character.encode_utf8(&mut bytes);
         for byte in encoded.bytes() {
-            self.push_partial(byte)?;
+            self.push_partial(byte, journal)?;
         }
         Ok(())
     }
@@ -569,12 +943,17 @@ impl JsonCursor {
     fn feed_literal(
         &mut self,
         byte: u8,
-        expected: &[u8],
         matched: u8,
         literal: Literal,
         events: &mut Vec<JsonEvent>,
+        journal: &mut CursorJournal,
         offset: usize,
     ) -> Result<bool, CursorError> {
+        let expected: &[u8] = match literal {
+            Literal::Bool(true) => b"true",
+            Literal::Bool(false) => b"false",
+            Literal::Null => b"null",
+        };
         let index = usize::from(matched);
         if index < expected.len() {
             if byte != expected[index] {
@@ -591,7 +970,7 @@ impl JsonCursor {
         if !is_delimiter(byte) {
             return Err(self.syntax(offset, "invalid literal boundary"));
         }
-        self.seal_literal(literal, events)?;
+        self.seal_literal(literal, events, journal)?;
         Ok(true)
     }
 
@@ -599,27 +978,35 @@ impl JsonCursor {
         &mut self,
         literal: Literal,
         events: &mut Vec<JsonEvent>,
+        journal: &mut CursorJournal,
     ) -> Result<(), CursorError> {
         let value = match literal {
             Literal::Bool(value) => self.arena.add_bool(value)?,
             Literal::Null => self.arena.add_null()?,
         };
         events.push(JsonEvent::ScalarSealed(value));
-        self.publish_value(value, events)
+        self.publish_value(value, events, journal)
     }
 
-    fn seal_number(&mut self, events: &mut Vec<JsonEvent>) -> Result<(), CursorError> {
+    fn seal_number(
+        &mut self,
+        events: &mut Vec<JsonEvent>,
+        journal: &mut CursorJournal,
+    ) -> Result<(), CursorError> {
         let number = CanonicalNumber::parse(&self.partial, &self.limits)?;
         let value = self.arena.add_number(number)?;
-        self.partial.clear();
+        journal.push(CursorUndo::RestorePartial(std::mem::take(
+            &mut self.partial,
+        )))?;
         events.push(JsonEvent::ScalarSealed(value));
-        self.publish_value(value, events)
+        self.publish_value(value, events, journal)
     }
 
     fn publish_value(
         &mut self,
         value: CanonicalId,
         events: &mut Vec<JsonEvent>,
+        journal: &mut CursorJournal,
     ) -> Result<(), CursorError> {
         match self.frames.last_mut() {
             Some(CursorFrame::Array { id, values }) => {
@@ -630,6 +1017,7 @@ impl JsonCursor {
                 }
                 let index = u64::try_from(values.len()).map_err(|_| CursorError::OffsetOverflow)?;
                 values.try_reserve(1).map_err(|_| CursorError::Allocation)?;
+                journal.push(CursorUndo::PopArrayValue(*id))?;
                 values.push(value);
                 events.push(JsonEvent::ItemSealed {
                     array: *id,
@@ -649,10 +1037,14 @@ impl JsonCursor {
                         limit: self.limits.max_object_members,
                     });
                 }
+                if current_key.is_none() {
+                    return Err(CursorError::Internal("property value without key"));
+                }
+                values.try_reserve(1).map_err(|_| CursorError::Allocation)?;
+                journal.push(CursorUndo::PopObjectValue(*id))?;
                 let key = current_key
                     .take()
-                    .ok_or(CursorError::Internal("property value without key"))?;
-                values.try_reserve(1).map_err(|_| CursorError::Allocation)?;
+                    .ok_or(CursorError::Internal("missing property key"))?;
                 values.push((key.clone(), value));
                 events.push(JsonEvent::PropertyValueSealed {
                     object: *id,
@@ -672,15 +1064,16 @@ impl JsonCursor {
         Ok(())
     }
 
-    fn push_partial(&mut self, byte: u8) -> Result<(), CursorError> {
+    fn push_partial(&mut self, byte: u8, journal: &mut CursorJournal) -> Result<(), CursorError> {
         if self.partial.len() >= self.limits.max_value_bytes {
             return Err(CursorError::ValueLimit {
                 limit: self.limits.max_value_bytes,
             });
         }
         self.partial
-            .try_reserve(1)
+            .try_reserve_exact(1)
             .map_err(|_| CursorError::Allocation)?;
+        journal.push(CursorUndo::TruncatePartial(self.partial.len()))?;
         self.partial.push(byte);
         Ok(())
     }
@@ -745,6 +1138,10 @@ pub enum CursorError {
     OffsetOverflow,
     #[error("cursor allocation failed")]
     Allocation,
+    #[error("cursor journal limit {limit} exceeded")]
+    JournalLimit { limit: usize },
+    #[error("invalid cursor journal mark")]
+    InvalidJournalMark,
     #[error("cursor internal invariant failed: {0}")]
     Internal(&'static str),
     #[error(transparent)]

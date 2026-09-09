@@ -7,5 +7,7 @@ pub use super::index::Index;
 pub use super::json_schema;
 pub use super::json_schema::compile::{compile_ir, compile_schema, CompileOptions, CompiledSchema};
 pub use super::primitives::{StateId, Token, TokenId};
-pub use super::sidememory::{CanonicalArena, CanonicalNumber, JsonCursor, TokenTable};
+pub use super::sidememory::{
+    CanonicalArena, CanonicalNumber, Guide, GuideOptions, JsonCursor, TokenTable,
+};
 pub use super::vocabulary::Vocabulary;

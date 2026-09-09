@@ -33,6 +33,11 @@ pub struct CanonicalArena {
     limits: RuntimeLimits,
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct EqualityScratch {
+    work: Vec<(CanonicalId, CanonicalId)>,
+}
+
 impl CanonicalArena {
     pub fn new(limits: RuntimeLimits) -> Self {
         Self {
@@ -197,8 +202,30 @@ impl CanonicalArena {
         other: &CanonicalArena,
         right: CanonicalId,
     ) -> Result<bool, ArenaError> {
-        let mut work = vec![(left, right)];
-        while let Some((left, right)) = work.pop() {
+        let mut scratch = EqualityScratch::default();
+        self.equal_across_with_scratch(left, other, right, &mut scratch)
+    }
+
+    pub(crate) fn equal_with_scratch(
+        &self,
+        left: CanonicalId,
+        right: CanonicalId,
+        scratch: &mut EqualityScratch,
+    ) -> Result<bool, ArenaError> {
+        self.equal_across_with_scratch(left, self, right, scratch)
+    }
+
+    fn equal_across_with_scratch(
+        &self,
+        left: CanonicalId,
+        other: &CanonicalArena,
+        right: CanonicalId,
+        scratch: &mut EqualityScratch,
+    ) -> Result<bool, ArenaError> {
+        scratch.work.clear();
+        reserve(&mut scratch.work, 1, "canonical equality work")?;
+        scratch.work.push((left, right));
+        while let Some((left, right)) = scratch.work.pop() {
             match (self.node(left)?, other.node(right)?) {
                 (CanonicalNode::Null, CanonicalNode::Null) => {}
                 (CanonicalNode::Bool(a), CanonicalNode::Bool(b)) if a == b => {}
@@ -216,7 +243,10 @@ impl CanonicalArena {
                     if left.len() != right.len() {
                         return Ok(false);
                     }
-                    work.extend(left.iter().zip(right).rev().map(|(a, b)| (*a, *b)));
+                    reserve(&mut scratch.work, left.len(), "canonical equality work")?;
+                    scratch
+                        .work
+                        .extend(left.iter().zip(right).rev().map(|(a, b)| (*a, *b)));
                 }
                 (CanonicalNode::Object(a), CanonicalNode::Object(b)) => {
                     let left =
@@ -231,7 +261,8 @@ impl CanonicalArena {
                             return Ok(false);
                         }
                     }
-                    work.extend(
+                    reserve(&mut scratch.work, left.len(), "canonical equality work")?;
+                    scratch.work.extend(
                         left.iter()
                             .zip(right)
                             .rev()

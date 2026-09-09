@@ -105,6 +105,31 @@ impl<'a> Parser<'a> {
             .map(|item| required_properties.contains(&item.as_str()))
             .collect();
 
+        // Small closed required shapes accept every JSON object member order.
+        if obj.get("__oc_unordered_required") == Some(&Value::Bool(true))
+            && properties.len() >= 2
+            && properties.len() <= 8
+            && is_required.iter().all(|value| *value)
+        {
+            let mut parts = Vec::with_capacity(properties.len());
+            for (name, value) in properties {
+                let mut part = format!(r#"{0}"{1}"{0}:{0}"#, self.whitespace_pattern, escape(name));
+                part += &self.to_regex(value)?;
+                parts.push(part);
+            }
+            let mut patterns = Vec::new();
+            collect_property_orders(
+                &parts,
+                self.whitespace_pattern,
+                &mut vec![false; parts.len()],
+                &mut Vec::with_capacity(parts.len()),
+                &mut patterns,
+            );
+            regex += &format!("({})", patterns.join("|"));
+            regex += &format!("{}\\}}", self.whitespace_pattern);
+            return Ok(regex);
+        }
+
         if is_required.iter().any(|&x| x) {
             let last_required_pos = is_required
                 .iter()
@@ -481,7 +506,7 @@ impl<'a> Parser<'a> {
             };
 
             Ok(format!(
-                r"((-)?(0|[1-9][0-9]{}))(\.[0-9]{})?([eE][+-][0-9]{})?",
+                r"((-)?(0|[1-9][0-9]{}))(\.[0-9]{})?([eE][+-]?[0-9]{})?",
                 integers_quantifier, fraction_quantifier, exponent_quantifier
             ))
         } else {
@@ -669,5 +694,34 @@ impl<'a> Parser<'a> {
                 }
             }
         }
+    }
+}
+
+fn collect_property_orders(
+    parts: &[String],
+    whitespace: &str,
+    used: &mut [bool],
+    order: &mut Vec<usize>,
+    output: &mut Vec<String>,
+) {
+    if order.len() == parts.len() {
+        output.push(
+            order
+                .iter()
+                .map(|index| parts[*index].as_str())
+                .collect::<Vec<_>>()
+                .join(&format!(",{whitespace}")),
+        );
+        return;
+    }
+    for index in 0..parts.len() {
+        if used[index] {
+            continue;
+        }
+        used[index] = true;
+        order.push(index);
+        collect_property_orders(parts, whitespace, used, order, output);
+        order.pop();
+        used[index] = false;
     }
 }
