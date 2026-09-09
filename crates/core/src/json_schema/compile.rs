@@ -296,7 +296,7 @@ impl<'a> IrBuilder<'a> {
                 continue;
             }
             let reason = if UNSUPPORTED_STANDARD.contains(&keyword.as_str()) {
-                "standard keyword is outside the Step 1 checked profile"
+                "standard keyword is outside the checked profile"
             } else {
                 "unknown extension keyword is rejected by profile"
             };

@@ -1,3 +1,5 @@
+#![cfg(debug_assertions)]
+
 use oc_sidememory::index::Index;
 use oc_sidememory::sidememory::{
     replay_committed, CompileLimits, ReplayError, RuntimeLimits, TokenTable,

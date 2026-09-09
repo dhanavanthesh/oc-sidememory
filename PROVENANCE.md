@@ -15,3 +15,8 @@ Every later commit is OC-Sidememory work.
 
 OC-Sidememory is an independent project. It is not a fork staged for
 merge-back and claims no upstream endorsement.
+
+The exact decimal implementation was written for this repository. It
+does not contain copied Maskforge code. Compiler
+classification tests use the upstream JSON Schema Test Suite by pinned
+revision as test data; the suite is not distributed with the package.
