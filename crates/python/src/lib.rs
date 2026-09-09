@@ -9,15 +9,48 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict};
 use pyo3::wrap_pyfunction;
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
-#[cfg(feature = "hugginface-hub")]
+#[cfg(feature = "huggingface-hub")]
 use tokenizers::FromPretrainedParameters;
 
 use oc_sidememory::index::Index;
 use oc_sidememory::json_schema;
 use oc_sidememory::prelude::*;
 
+const SERIALIZATION_MAGIC: &[u8; 3] = b"OCS";
+const SERIALIZATION_VERSION: u8 = 1;
+
 fn core_error(error: oc_sidememory::Error) -> PyErr {
     PyValueError::new_err(error.to_string())
+}
+
+fn encode_envelope<T: Encode>(value: &T, kind: u8) -> PyResult<Vec<u8>> {
+    let payload = bincode::encode_to_vec(value, config::standard())
+        .map_err(|error| PyValueError::new_err(format!("Serialization failed: {error}")))?;
+    let mut bytes = Vec::with_capacity(5 + payload.len());
+    bytes.extend_from_slice(SERIALIZATION_MAGIC);
+    bytes.push(SERIALIZATION_VERSION);
+    bytes.push(kind);
+    bytes.extend_from_slice(&payload);
+    Ok(bytes)
+}
+
+fn decode_envelope<T: Decode<()>>(bytes: &[u8], kind: u8) -> PyResult<T> {
+    if bytes.len() < 5 || &bytes[..3] != SERIALIZATION_MAGIC {
+        return Err(PyValueError::new_err(
+            "Unversioned or incompatible serialized data",
+        ));
+    }
+    if bytes[3] != SERIALIZATION_VERSION || bytes[4] != kind {
+        return Err(PyValueError::new_err(
+            "Unsupported serialization version or object kind",
+        ));
+    }
+    let (value, consumed): (T, usize) = bincode::decode_from_slice(&bytes[5..], config::standard())
+        .map_err(|error| PyValueError::new_err(format!("Deserialization failed: {error}")))?;
+    if consumed != bytes.len() - 5 {
+        return Err(PyValueError::new_err("Trailing bytes in serialized data"));
+    }
+    Ok(value)
 }
 
 macro_rules! type_name {
@@ -218,26 +251,24 @@ impl PyGuide {
     fn __reduce__(&self) -> PyResult<(Py<PyAny>, (Vec<u8>,))> {
         Python::attach(|py| {
             let cls = PyModule::import(py, "oc_sidememory")?.getattr("Guide")?;
-            let binary_data: Vec<u8> =
-                bincode::encode_to_vec(self, config::standard()).map_err(|e| {
-                    PyErr::new::<PyValueError, _>(format!("Serialization of Guide failed: {}", e))
-                })?;
+            let binary_data = encode_envelope(self, b'G')?;
             Ok((cls.getattr("from_binary")?.unbind(), (binary_data,)))
         })
     }
 
     #[staticmethod]
     fn from_binary(binary_data: Vec<u8>) -> PyResult<Self> {
-        let (guide, _): (PyGuide, usize) =
-            bincode::decode_from_slice(&binary_data[..], config::standard()).map_err(|e| {
-                PyErr::new::<PyValueError, _>(format!("Deserialization of Guide failed: {}", e))
-            })?;
-        Ok(guide)
+        decode_envelope(&binary_data, b'G')
     }
 }
 
 /// Index object based on regex and vocabulary.
-#[pyclass(name = "Index", module = "oc_sidememory._native", frozen, from_py_object)]
+#[pyclass(
+    name = "Index",
+    module = "oc_sidememory._native",
+    frozen,
+    from_py_object
+)]
 #[derive(Clone, Debug, PartialEq, Encode, Decode)]
 pub struct PyIndex(Arc<Index>);
 
@@ -306,20 +337,14 @@ impl PyIndex {
     fn __reduce__(&self) -> PyResult<(Py<PyAny>, (Vec<u8>,))> {
         Python::attach(|py| {
             let cls = PyModule::import(py, "oc_sidememory")?.getattr("Index")?;
-            let binary_data: Vec<u8> = bincode::encode_to_vec(&self.0, config::standard())
-                .map_err(|e| {
-                    PyErr::new::<PyValueError, _>(format!("Serialization of Index failed: {}", e))
-                })?;
+            let binary_data = encode_envelope(self.0.as_ref(), b'I')?;
             Ok((cls.getattr("from_binary")?.unbind(), (binary_data,)))
         })
     }
 
     #[staticmethod]
     fn from_binary(binary_data: Vec<u8>) -> PyResult<Self> {
-        let (index, _): (Index, usize) =
-            bincode::decode_from_slice(&binary_data[..], config::standard()).map_err(|e| {
-                PyErr::new::<PyValueError, _>(format!("Deserialization of Index failed: {}", e))
-            })?;
+        let index: Index = decode_envelope(&binary_data, b'I')?;
         Ok(PyIndex(Arc::new(index)))
     }
 }
@@ -361,7 +386,7 @@ impl PyVocabulary {
     /// Creates the vocabulary of a pre-trained model.
     #[staticmethod]
     #[pyo3(signature = (model, revision=None, token=None))]
-    #[cfg(feature = "hugginface-hub")]
+    #[cfg(feature = "huggingface-hub")]
     fn from_pretrained(
         model: String,
         revision: Option<String>,
@@ -374,7 +399,7 @@ impl PyVocabulary {
         if token.is_some() {
             params.token = token
         }
-        let v = Vocabulary::from_pretrained(model.as_str(), Some(params))?;
+        let v = Vocabulary::from_pretrained(model.as_str(), Some(params)).map_err(core_error)?;
         Ok(PyVocabulary(v))
     }
 
@@ -455,27 +480,14 @@ impl PyVocabulary {
     fn __reduce__(&self) -> PyResult<(Py<PyAny>, (Vec<u8>,))> {
         Python::attach(|py| {
             let cls = PyModule::import(py, "oc_sidememory")?.getattr("Vocabulary")?;
-            let binary_data: Vec<u8> =
-                bincode::encode_to_vec(self, config::standard()).map_err(|e| {
-                    PyErr::new::<PyValueError, _>(format!(
-                        "Serialization of Vocabulary failed: {}",
-                        e
-                    ))
-                })?;
+            let binary_data = encode_envelope(self, b'V')?;
             Ok((cls.getattr("from_binary")?.unbind(), (binary_data,)))
         })
     }
 
     #[staticmethod]
     fn from_binary(binary_data: Vec<u8>) -> PyResult<Self> {
-        let (guide, _): (PyVocabulary, usize) =
-            bincode::decode_from_slice(&binary_data[..], config::standard()).map_err(|e| {
-                PyErr::new::<PyValueError, _>(format!(
-                    "Deserialization of Vocabulary failed: {}",
-                    e
-                ))
-            })?;
-        Ok(guide)
+        decode_envelope(&binary_data, b'V')
     }
 }
 

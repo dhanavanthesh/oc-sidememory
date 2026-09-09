@@ -15,7 +15,6 @@ __pycache__
 benchmarks/results
 benchmarks/env
 build
-Cargo.lock
 dist
 docs/build
 logs

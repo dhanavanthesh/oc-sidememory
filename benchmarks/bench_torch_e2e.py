@@ -1,7 +1,7 @@
 import torch
 
-from outlines_core import Guide, Index, Vocabulary
-from outlines_core.kernels.torch import (
+from oc_sidememory import Guide, Index, Vocabulary
+from oc_sidememory.kernels.torch import (
     _apply_token_bitmask_inplace_kernel,
     allocate_token_bitmask,
 )

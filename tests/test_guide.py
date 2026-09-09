@@ -4,7 +4,7 @@ from typing import Dict, List, Union
 
 import pytest
 
-from outlines_core import Guide, Index, Vocabulary
+from oc_sidememory import Guide, Index, Vocabulary
 
 
 @pytest.fixture(scope="session")

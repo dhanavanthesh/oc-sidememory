@@ -1,7 +1,7 @@
 """Tests for package imports to catch import/module registration issues."""
 
 
-def test_import_outlines_core():
+def test_import_oc_sidememory():
     import oc_sidememory
 
     assert hasattr(oc_sidememory, "Guide")

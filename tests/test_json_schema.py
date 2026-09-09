@@ -4,7 +4,7 @@ import re
 import pytest
 from pydantic import BaseModel
 
-from outlines_core.json_schema import build_regex_from_schema
+from oc_sidememory.json_schema import build_regex_from_schema
 
 
 def test_build_regex_from_json_schema():
@@ -33,7 +33,7 @@ def test_invalid_json():
 
 
 def test_types_presence_and_not_emptyness():
-    from outlines_core.json_schema import (
+    from oc_sidememory.json_schema import (
         BOOLEAN,
         DATE,
         DATE_TIME,

@@ -57,7 +57,7 @@ test-rust:
 # Run python tests.
 test-python: build-extension-debug
 	pytest -svv tests -k "$(TARGET)" \
-		--cov=outlines_core \
+		--cov=oc_sidememory \
 		--cov-report=term-missing:skip-covered
 
 # Check if tarpaulin needs to be installed first.

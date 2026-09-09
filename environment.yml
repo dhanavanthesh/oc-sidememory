@@ -3,7 +3,7 @@
 #   $ conda env create -f environment.yml  # `mamba` works too for this command
 #   $ conda activate dottxt-ai
 #
-name: outlines-core-dev
+name: oc-sidememory-dev
 channels:
   - conda-forge
   - huggingface

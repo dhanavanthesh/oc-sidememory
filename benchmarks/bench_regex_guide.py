@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import psutil
 
-from outlines_core import Guide, Index, Vocabulary
+from oc_sidememory import Guide, Index, Vocabulary
 
 regex_samples = {
     "email": r"[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?",
@@ -91,7 +91,7 @@ class WriteMaskIntoBenchmark:
     param_names = ["regex_key"]
 
     def setup(self, regex_key):
-        from outlines_core.kernels.torch import allocate_token_bitmask
+        from oc_sidememory.kernels.torch import allocate_token_bitmask
 
         self.vocab = Vocabulary.from_pretrained("gpt2")
         self.mask = allocate_token_bitmask(len(self.vocab))

@@ -4,7 +4,7 @@ import pickle
 
 import pytest
 
-from outlines_core import Index, Vocabulary
+from oc_sidememory import Index, Vocabulary
 
 
 @pytest.fixture(scope="session")

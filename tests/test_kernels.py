@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import torch
 
-from outlines_core import Guide, Index, Vocabulary
+from oc_sidememory import Guide, Index, Vocabulary
 
 VOCAB = Vocabulary.from_pretrained("gpt2", None, None)
 VOCAB_LEN = len(VOCAB)
@@ -24,7 +24,7 @@ def guide() -> Guide:
 )
 @pytest.mark.no_cover
 def test_interface_torch():
-    from outlines_core.kernels.torch import (
+    from oc_sidememory.kernels.torch import (
         allocate_token_bitmask,
         apply_token_bitmask_inplace,
         fill_next_token_bitmask,
@@ -78,7 +78,7 @@ def test_interface_torch():
 @pytest.mark.no_cover
 def test_interface_numpy():
     pytest.importorskip("numba", exc_type=ModuleNotFoundError)
-    from outlines_core.kernels.numpy import (
+    from oc_sidememory.kernels.numpy import (
         allocate_token_bitmask,
         apply_token_bitmask_inplace,
         fill_next_token_bitmask,
@@ -136,7 +136,7 @@ def test_interface_mlx():
     import numpy as np
     import pytest
 
-    from outlines_core.kernels.mlx import (
+    from oc_sidememory.kernels.mlx import (
         allocate_token_bitmask,
         apply_token_bitmask,
         fill_next_token_bitmask,
@@ -190,7 +190,7 @@ def test_interface_mlx():
 )
 @pytest.mark.no_cover
 def test_torch_correctness(guide):
-    from outlines_core.kernels.torch import _apply_token_bitmask_inplace_kernel
+    from oc_sidememory.kernels.torch import _apply_token_bitmask_inplace_kernel
 
     allowed_tokens = set(guide.get_tokens())
 
@@ -221,7 +221,7 @@ def test_torch_correctness(guide):
 def test_numpy_correctness(guide):
     pytest.importorskip("numba", exc_type=ModuleNotFoundError)
 
-    from outlines_core.kernels.numpy import _apply_token_bitmask_inplace_kernel
+    from oc_sidememory.kernels.numpy import _apply_token_bitmask_inplace_kernel
 
     allowed_tokens = set(guide.get_tokens())
 
@@ -254,7 +254,7 @@ def test_numpy_correctness(guide):
 def test_mlx_correctness(guide):
     import mlx.core as mx
 
-    from outlines_core.kernels.mlx import _apply_token_bitmask_kernel
+    from oc_sidememory.kernels.mlx import _apply_token_bitmask_kernel
 
     allowed_tokens = set(guide.get_tokens())
 

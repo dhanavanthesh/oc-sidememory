@@ -1,5 +1,5 @@
-from outlines_core import Index, Vocabulary
-from outlines_core.json_schema import build_regex_from_schema
+from oc_sidememory import Index, Vocabulary
+from oc_sidememory.json_schema import build_regex_from_schema
 
 simple_schema = """{
         "$defs": {

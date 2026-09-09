@@ -3,7 +3,7 @@ import pickle
 
 import pytest
 
-from outlines_core import Vocabulary
+from oc_sidememory import Vocabulary
 
 
 @pytest.fixture(scope="session")

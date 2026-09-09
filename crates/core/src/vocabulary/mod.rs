@@ -1,22 +1,22 @@
 //! Creates `Vocabulary` manually or from pretrained large language model.
 
 use bincode::{Decode, Encode};
-#[cfg(feature = "hugginface-hub")]
+#[cfg(feature = "huggingface-hub")]
 use locator::{HFLocator, Locator};
-#[cfg(feature = "hugginface-hub")]
+#[cfg(feature = "huggingface-hub")]
 use processor::TokenProcessor;
 use rustc_hash::FxHashMap as HashMap;
-#[cfg(feature = "hugginface-hub")]
+#[cfg(feature = "huggingface-hub")]
 use tokenizers::normalizers::Sequence;
-#[cfg(feature = "hugginface-hub")]
+#[cfg(feature = "huggingface-hub")]
 use tokenizers::{NormalizerWrapper, Tokenizer};
 
 use crate::prelude::*;
 use crate::{Error, Result};
 
-#[cfg(feature = "hugginface-hub")]
+#[cfg(feature = "huggingface-hub")]
 mod locator;
-#[cfg(feature = "hugginface-hub")]
+#[cfg(feature = "huggingface-hub")]
 mod processor;
 
 /// `Vocabulary` of large language model.
@@ -24,18 +24,18 @@ mod processor;
 /// ## Examples
 ///
 #[cfg_attr(
-    feature = "hugginface-hub",
+    feature = "huggingface-hub",
     doc = r##"
 /// ### Create a vocabulary from a pretrained model.
 /// ```rust
-/// use outlines_core::prelude::*;
+/// use oc_sidememory::prelude::*;
 ///
 /// let vocabulary = Vocabulary::from_pretrained("openai-community/gpt2", None);
 /// ```
 ///
 /// ### Create a vocabulary from a pretrained model with some additional parameters.
 /// ``` rust
-/// use outlines_core::prelude::*;
+/// use oc_sidememory::prelude::*;
 ///
 /// let params = FromPretrainedParameters {
 ///     revision: "607a30d783dfa663caf39e06633721c8d4cfcd7e".to_string(),
@@ -47,7 +47,7 @@ mod processor;
 ///
 /// ### Create an empty vocabulary and manually insert some tokens.
 /// ```rust
-/// use outlines_core::prelude::*;
+/// use oc_sidememory::prelude::*;
 ///
 /// let eos_token_id = 1;
 /// let mut vocabulary = Vocabulary::new(eos_token_id);
@@ -78,7 +78,7 @@ impl Vocabulary {
     }
 
     /// Creates the vocabulary of pre-trained model from Hugging Face Hub.
-    #[cfg(feature = "hugginface-hub")]
+    #[cfg(feature = "huggingface-hub")]
     pub fn from_pretrained(
         model: &str,
         parameters: Option<FromPretrainedParameters>,
@@ -88,7 +88,7 @@ impl Vocabulary {
 
     #[doc(hidden)]
     #[inline(always)]
-    #[cfg(feature = "hugginface-hub")]
+    #[cfg(feature = "huggingface-hub")]
     fn from_pretrained_with_locator<L: Locator>(
         model: &str,
         parameters: Option<FromPretrainedParameters>,
@@ -171,7 +171,7 @@ impl Vocabulary {
     }
 
     /// Filters out `Prepend` kind of tokenizer's normalizers.
-    #[cfg(feature = "hugginface-hub")]
+    #[cfg(feature = "huggingface-hub")]
     fn filter_prepend_normalizers(tokenizer: &mut Tokenizer) {
         // Main concern is prepend normalizers, for example https://github.com/google/sentencepiece
         // In `sentencepiece` tokenizer, `▁` is used to denote spaces in the source text,
@@ -317,7 +317,7 @@ mod tests {
         assert!(vocabulary.tokens.is_empty());
     }
 
-    #[cfg(feature = "hugginface-hub")]
+    #[cfg(feature = "huggingface-hub")]
     #[test]
     fn supported_pretrained_models() {
         // Support is expected for these:
@@ -345,7 +345,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "hugginface-hub")]
+    #[cfg(feature = "huggingface-hub")]
     #[test]
     fn pretrained_from_gpt2() {
         let model = "openai-community/gpt2";
@@ -377,7 +377,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "hugginface-hub")]
+    #[cfg(feature = "huggingface-hub")]
     #[test]
     fn pretrained_from_llama() {
         use rustc_hash::FxHashSet as HashSet;
@@ -422,7 +422,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "hugginface-hub")]
+    #[cfg(feature = "huggingface-hub")]
     #[test]
     fn token_processor_error() {
         let model = "hf-internal-testing/tiny-random-XLMRobertaXLForCausalLM";
@@ -437,7 +437,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "hugginface-hub")]
+    #[cfg(feature = "huggingface-hub")]
     #[test]
     fn tokenizer_error() {
         let model = "hf-internal-testing/some-non-existent-model";
@@ -449,9 +449,9 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "hugginface-hub")]
+    #[cfg(feature = "huggingface-hub")]
     struct NoneLocator;
-    #[cfg(feature = "hugginface-hub")]
+    #[cfg(feature = "huggingface-hub")]
     impl Locator for NoneLocator {
         fn locate_eos_token_id(
             _model: &str,
@@ -462,7 +462,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "hugginface-hub")]
+    #[cfg(feature = "huggingface-hub")]
     #[test]
     fn unable_to_locate_eos_token_id_error() {
         let model = "hf-internal-testing/tiny-random-XLMRobertaXLForCausalLM";
@@ -478,7 +478,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "hugginface-hub")]
+    #[cfg(feature = "huggingface-hub")]
     fn prepend_normalizers_filtered_out() {
         use tokenizers::normalizers::{Prepend, Sequence};
 
@@ -511,7 +511,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "hugginface-hub")]
+    #[cfg(feature = "huggingface-hub")]
     fn other_normalizers_being_kept() {
         use tokenizers::normalizers::BertNormalizer;
 

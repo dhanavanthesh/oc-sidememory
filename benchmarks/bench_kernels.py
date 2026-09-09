@@ -3,10 +3,10 @@ import random
 import numpy as np
 import torch
 
-from outlines_core.kernels.numpy import (
+from oc_sidememory.kernels.numpy import (
     _apply_token_bitmask_inplace_kernel as numpy_kernel,
 )
-from outlines_core.kernels.torch import (
+from oc_sidememory.kernels.torch import (
     _apply_token_bitmask_inplace_kernel as torch_kernel,
 )
 
@@ -86,7 +86,7 @@ class MlxBitmaskApplyBenchmark:
         try:
             import mlx.core as mx
 
-            from outlines_core.kernels.mlx import (
+            from oc_sidememory.kernels.mlx import (
                 _apply_token_bitmask_kernel as mlx_kernel,
             )
         except ImportError:

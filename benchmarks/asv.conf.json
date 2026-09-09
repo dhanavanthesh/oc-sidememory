@@ -1,7 +1,7 @@
 {
     "version": 1,
-    "project": "outlines-core",
-    "project_url": "https://dottxt-ai.github.io/outlines-core/",
+    "project": "oc-sidememory",
+    "project_url": "https://github.com/dhanavanthesh/oc-sidememory",
     "repo": "..",
     "branches": [
 	      "HEAD"
@@ -16,7 +16,7 @@
         "numba": ["0.60.0"]
     },
     "environment_type": "virtualenv",
-    "show_commit_url": "https://github.com/dottxt-ai/outlines-core/commit/",
+    "show_commit_url": "https://github.com/dhanavanthesh/oc-sidememory/commit/",
     "benchmark_dir": ".",
     "env_dir": "env",
     "results_dir": "results",

@@ -16,7 +16,7 @@ pub enum Error {
     EOSTokenDisallowed,
     #[error(transparent)]
     TokenizersError(#[from] tokenizers::Error),
-    #[error("Unsupported tokenizer for {model}: {reason}, please open an issue with the full error message: https://github.com/dottxt-ai/outlines-core/issues")]
+    #[error("Unsupported tokenizer for {model}: {reason}, please open an issue with the full error message: https://github.com/dhanavanthesh/oc-sidememory/issues")]
     UnsupportedTokenizer { model: String, reason: String },
     #[error("Unable to locate EOS token for {model}")]
     UnableToLocateEosTokenId { model: String },
@@ -84,4 +84,3 @@ impl Error {
         matches!(self, Self::RefRecursionLimitReached(_))
     }
 }
-

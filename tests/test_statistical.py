@@ -4,7 +4,7 @@ import numpy as np
 from pytest import approx
 from scipy.stats import ks_2samp
 
-from outlines_core import Guide, Index, Vocabulary
+from oc_sidememory import Guide, Index, Vocabulary
 
 
 def test_generate_length():
