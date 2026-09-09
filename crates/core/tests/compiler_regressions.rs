@@ -113,3 +113,43 @@ fn false_unique_items_remains_a_profile_no_op() {
     .unwrap();
     assert!(ir.nodes()[0].semantic.is_empty());
 }
+
+#[test]
+fn number_schema_accepts_exponent_without_explicit_sign() {
+    let (vocabulary, width) = common::ascii_vocabulary();
+    let compiled = compile_schema(
+        br#"{"type":"number"}"#,
+        &vocabulary,
+        width,
+        &CompileOptions::default(),
+    )
+    .unwrap();
+    let mut state = compiled.index().initial_state();
+    for token in b"1e0" {
+        state = compiled
+            .index()
+            .next_state(&state, &u32::from(*token))
+            .expect("valid JSON number prefix");
+    }
+    assert!(compiled.index().is_final_state(&state));
+}
+
+#[test]
+fn string_schema_accepts_json_unicode_escape() {
+    let (vocabulary, width) = common::ascii_vocabulary();
+    let compiled = compile_schema(
+        br#"{"type":"string"}"#,
+        &vocabulary,
+        width,
+        &CompileOptions::default(),
+    )
+    .unwrap();
+    let mut state = compiled.index().initial_state();
+    for token in br#""\u00e9""# {
+        state = compiled
+            .index()
+            .next_state(&state, &u32::from(*token))
+            .expect("valid JSON string escape");
+    }
+    assert!(compiled.index().is_final_state(&state));
+}
