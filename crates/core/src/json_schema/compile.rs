@@ -220,6 +220,25 @@ impl<'a> IrBuilder<'a> {
                     reason: "minItems exceeds maxItems".into(),
                 });
             }
+            let item_limit =
+                u64::try_from(self.options.runtime_limits.max_array_items).map_err(|_| {
+                    ResourceError::CompactIdOverflow {
+                        context: "max_array_items",
+                    }
+                })?;
+            if min_items > item_limit || max_items.is_some_and(|maximum| maximum > item_limit) {
+                let requested = usize::try_from(max_items.unwrap_or(min_items)).map_err(|_| {
+                    ResourceError::CompactIdOverflow {
+                        context: "array item bound",
+                    }
+                })?;
+                return Err(ResourceError::LimitExceeded {
+                    limit_name: "max_array_items",
+                    limit_value: self.options.runtime_limits.max_array_items,
+                    requested,
+                }
+                .into());
+            }
             if keyword_bool(object, "uniqueItems", false, &location)? {
                 semantic.push(SemanticAssertion::UniqueItems);
             }
@@ -326,9 +345,10 @@ impl<'a> IrBuilder<'a> {
                 });
             }
             let mut result = Vec::with_capacity(values.len());
+            let mut seen = HashSet::with_capacity(values.len());
             for value in values {
                 let value = scalar_literal(value, &self.options.runtime_limits, location, "enum")?;
-                if result.contains(&value) {
+                if !seen.insert(value.clone()) {
                     return Err(invalid(
                         location,
                         "enum",
@@ -384,9 +404,6 @@ impl<'a> IrBuilder<'a> {
                     let name = value.as_str().ok_or_else(|| {
                         invalid(location, "required", "an array of unique strings")
                     })?;
-                    if required.iter().any(|existing| existing.as_ref() == name) {
-                        return Err(invalid(location, "required", "an array of unique strings"));
-                    }
                     if !raw_properties.contains_key(name) {
                         return Err(invalid(
                             location,
@@ -713,12 +730,19 @@ const UNSUPPORTED_STANDARD: &[&str] = &[
     "maxProperties",
 ];
 
-#[allow(dead_code)]
-fn _keyword_uniqueness() -> HashSet<&'static str> {
-    SUPPORTED
-        .iter()
-        .chain(ANNOTATIONS)
-        .chain(UNSUPPORTED_STANDARD)
-        .copied()
-        .collect()
+#[cfg(test)]
+mod tests {
+    use super::{ANNOTATIONS, SUPPORTED, UNSUPPORTED_STANDARD};
+
+    #[test]
+    fn keyword_classification_lists_are_disjoint() {
+        let mut seen = std::collections::HashSet::new();
+        for keyword in SUPPORTED
+            .iter()
+            .chain(ANNOTATIONS)
+            .chain(UNSUPPORTED_STANDARD)
+        {
+            assert!(seen.insert(*keyword), "{keyword} classified twice");
+        }
+    }
 }

@@ -1,4 +1,4 @@
-use oc_sidememory::sidememory::{CanonicalArena, RuntimeLimits};
+use oc_sidememory::sidememory::{ArenaError, CanonicalArena, ResourceError, RuntimeLimits};
 
 #[test]
 fn failed_growth_does_not_mutate_arena() {
@@ -36,4 +36,54 @@ fn deep_iterative_equality_does_not_recurse() {
         right = arena.add_array(&[right]).unwrap();
     }
     assert!(arena.equal(left, right).unwrap());
+}
+
+#[test]
+fn value_and_arena_byte_limits_are_independent() {
+    let limits = RuntimeLimits {
+        max_value_bytes: 3,
+        max_arena_bytes: 8,
+        ..RuntimeLimits::default()
+    };
+    let mut arena = CanonicalArena::new(limits);
+    arena.add_string(b"abc").unwrap();
+    arena.add_string(b"def").unwrap();
+
+    assert!(matches!(
+        arena.add_string(b"long"),
+        Err(ArenaError::Resource(ResourceError::LimitExceeded {
+            limit_name: "max_value_bytes",
+            ..
+        }))
+    ));
+    assert!(matches!(
+        arena.add_string(b"ghi"),
+        Err(ArenaError::Resource(ResourceError::LimitExceeded {
+            limit_name: "max_arena_bytes",
+            ..
+        }))
+    ));
+}
+
+#[test]
+fn object_keys_use_the_arena_byte_limit() {
+    let limits = RuntimeLimits {
+        max_value_bytes: 3,
+        max_arena_bytes: 5,
+        ..RuntimeLimits::default()
+    };
+    let mut arena = CanonicalArena::new(limits);
+    let value = arena.add_null().unwrap();
+    let before = arena.mark();
+    let error = arena
+        .add_object(vec![(b"abc".to_vec(), value), (b"def".to_vec(), value)])
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        ArenaError::Resource(ResourceError::LimitExceeded {
+            limit_name: "max_arena_bytes",
+            ..
+        })
+    ));
+    assert_eq!(arena.mark(), before);
 }

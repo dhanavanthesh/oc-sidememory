@@ -21,7 +21,7 @@ pub struct Index {
     /// A mapping of state transitions, defined by tokens ids and their corresponding state changes.
     ///
     /// ### Example
-    /// ```ignore
+    /// ```text
     /// transitions = {
     ///    1: {10: 2, 15: 3},
     ///    2: {20: 4, 25: 3},

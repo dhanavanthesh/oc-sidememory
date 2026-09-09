@@ -1,7 +1,13 @@
 use serde_json::{Map, Value};
 
+use crate::sidememory::number::CanonicalNumber;
+
 use super::diagnostic::CompileError;
-use super::ir::{InstanceType, ScalarLiteral, SchemaIr, SchemaNode, SchemaNodeId};
+use super::ir::{InstanceType, ScalarLiteral, SchemaIr, SchemaNodeId};
+
+/// Digit ceiling for expanding a numeric literal to plain decimal; past this the
+/// grammar falls back to the exact scientific spelling.
+const MAX_LITERAL_DIGITS: usize = 4096;
 
 pub(crate) fn lower(ir: &SchemaIr) -> Result<Value, CompileError> {
     build(ir, ir.root())
@@ -89,8 +95,7 @@ fn literal(value: &ScalarLiteral) -> Result<Value, CompileError> {
         ScalarLiteral::Bool(value) => Ok(Value::Bool(*value)),
         ScalarLiteral::String(value) => Ok(Value::String(value.to_string())),
         ScalarLiteral::Number(value) => {
-            let sign = if value.is_negative() { "-" } else { "" };
-            let text = format!("{}{}e{}", sign, value.coefficient(), value.exponent());
+            let text = number_to_json(value);
             serde_json::from_str(&text).map_err(|error| CompileError::InternalInvariant {
                 context: format!("canonical number could not be lowered: {error}").into_boxed_str(),
             })
@@ -98,7 +103,40 @@ fn literal(value: &ScalarLiteral) -> Result<Value, CompileError> {
     }
 }
 
-#[allow(dead_code)]
-fn _location(node: &SchemaNode) -> &str {
-    node.schema_location.as_str()
+/// Render a canonical number as the exact JSON spelling the grammar accepts:
+/// plain decimal when the expansion is bounded, exact scientific otherwise.
+fn number_to_json(number: &CanonicalNumber) -> String {
+    let coefficient = number.coefficient();
+    let sign = if number.is_negative() { "-" } else { "" };
+    if coefficient == "0" {
+        return "0".to_string();
+    }
+    let digits = coefficient.len();
+    let Ok(exponent) = number.exponent().parse::<i64>() else {
+        return format!("{sign}{coefficient}e{}", number.exponent());
+    };
+    if exponent >= 0 {
+        let Ok(zeros) = usize::try_from(exponent) else {
+            return format!("{sign}{coefficient}e{exponent}");
+        };
+        if digits
+            .checked_add(zeros)
+            .is_none_or(|total| total > MAX_LITERAL_DIGITS)
+        {
+            return format!("{sign}{coefficient}e{exponent}");
+        }
+        format!("{sign}{coefficient}{}", "0".repeat(zeros))
+    } else {
+        let Ok(shift) = usize::try_from(exponent.unsigned_abs()) else {
+            return format!("{sign}{coefficient}e{exponent}");
+        };
+        if shift < digits {
+            let point = digits - shift;
+            format!("{sign}{}.{}", &coefficient[..point], &coefficient[point..])
+        } else if shift > MAX_LITERAL_DIGITS {
+            format!("{sign}{coefficient}e{exponent}")
+        } else {
+            format!("{sign}0.{}{coefficient}", "0".repeat(shift - digits))
+        }
+    }
 }

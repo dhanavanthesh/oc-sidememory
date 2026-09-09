@@ -29,6 +29,7 @@ impl Default for CompileLimits {
 pub struct RuntimeLimits {
     pub max_nesting_depth: usize,
     pub max_value_bytes: usize,
+    pub max_arena_bytes: usize,
     pub max_number_digits: usize,
     pub max_exponent_digits: usize,
     pub max_arena_nodes: usize,
@@ -42,6 +43,7 @@ impl Default for RuntimeLimits {
         Self {
             max_nesting_depth: 128,
             max_value_bytes: 8 << 20,
+            max_arena_bytes: 64 << 20,
             max_number_digits: 1 << 20,
             max_exponent_digits: 4096,
             max_arena_nodes: 1_000_000,

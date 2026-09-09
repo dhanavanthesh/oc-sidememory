@@ -82,11 +82,19 @@ impl CanonicalArena {
 
     pub fn add_string(&mut self, value: &[u8]) -> Result<CanonicalId, ArenaError> {
         std::str::from_utf8(value).map_err(|_| ArenaError::InvalidUtf8)?;
+        if value.len() > self.limits.max_value_bytes {
+            return Err(ResourceError::LimitExceeded {
+                limit_name: "max_value_bytes",
+                limit_value: self.limits.max_value_bytes,
+                requested: value.len(),
+            }
+            .into());
+        }
         let end = checked_growth(
             self.bytes.len(),
             value.len(),
-            self.limits.max_value_bytes,
-            "max_value_bytes",
+            self.limits.max_arena_bytes,
+            "max_arena_bytes",
         )?;
         let span = span(self.bytes.len(), value.len(), "string bytes")?;
         reserve(&mut self.bytes, value.len(), "arena bytes")?;
@@ -127,6 +135,14 @@ impl CanonicalArena {
         }
         for (key, value) in &values {
             std::str::from_utf8(key).map_err(|_| ArenaError::InvalidUtf8)?;
+            if key.len() > self.limits.max_value_bytes {
+                return Err(ResourceError::LimitExceeded {
+                    limit_name: "max_value_bytes",
+                    limit_value: self.limits.max_value_bytes,
+                    requested: key.len(),
+                }
+                .into());
+            }
             self.validate_id(*value)?;
         }
         values.sort_unstable_by(|left, right| left.0.cmp(&right.0));
@@ -143,8 +159,8 @@ impl CanonicalArena {
         checked_growth(
             self.bytes.len(),
             key_bytes,
-            self.limits.max_value_bytes,
-            "max_value_bytes",
+            self.limits.max_arena_bytes,
+            "max_arena_bytes",
         )?;
         let entries = entry_span(self.entries.len(), values.len())?;
         reserve(&mut self.bytes, key_bytes, "object key bytes")?;

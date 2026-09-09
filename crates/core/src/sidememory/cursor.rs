@@ -1,6 +1,7 @@
+use std::collections::HashSet;
+
 use thiserror::Error;
 
-use crate::json_schema::ir::SchemaNodeId;
 use crate::primitives::TokenId;
 
 use super::canonical::{ArenaError, CanonicalArena};
@@ -90,6 +91,7 @@ enum CursorFrame {
         id: FrameId,
         current_key: Option<Vec<u8>>,
         values: Vec<(Vec<u8>, CanonicalId)>,
+        seen_keys: HashSet<Vec<u8>>,
     },
 }
 
@@ -465,6 +467,7 @@ impl JsonCursor {
             id,
             current_key: None,
             values: Vec::new(),
+            seen_keys: HashSet::new(),
         });
         self.mode = CursorMode::ExpectObjectKeyOrEnd;
         events.push(JsonEvent::ObjectStart(id));
@@ -486,6 +489,7 @@ impl JsonCursor {
             id,
             current_key: _,
             values,
+            seen_keys: _,
         }) = self.frames.pop()
         else {
             return Err(self.syntax(self.byte_offset.saturating_sub(1), "mismatched '}'"));
@@ -519,12 +523,13 @@ impl JsonCursor {
             let Some(CursorFrame::Object {
                 id,
                 current_key,
-                values,
+                seen_keys,
+                ..
             }) = self.frames.last_mut()
             else {
                 return Err(CursorError::Internal("object key without object frame"));
             };
-            if values.iter().any(|(existing, _)| *existing == key) {
+            if !seen_keys.insert(key.clone()) {
                 return Err(CursorError::DuplicateObjectKey {
                     byte_offset: self.byte_offset,
                 });
@@ -637,6 +642,7 @@ impl JsonCursor {
                 id,
                 current_key,
                 values,
+                ..
             }) => {
                 if values.len() >= self.limits.max_object_members {
                     return Err(CursorError::MemberLimit {
@@ -852,6 +858,3 @@ fn feed_utf8(state: &mut Utf8State, byte: u8) -> Result<(), &'static str> {
     }
     Ok(())
 }
-
-#[allow(dead_code)]
-fn _schema_node_marker(_: SchemaNodeId) {}

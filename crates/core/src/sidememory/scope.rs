@@ -1,56 +1,9 @@
 use thiserror::Error;
 
-use crate::json_schema::ir::SchemaNodeId;
-
-use super::canonical::ArenaMark;
-use super::value::CanonicalId;
-
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct FrameId {
     pub slot: u32,
     pub generation: u32,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ParentTarget {
-    Root,
-    Array(FrameId),
-    Object(FrameId),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Frame {
-    Array(ArrayFrame),
-    Object(ObjectFrame),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ArrayFrame {
-    pub id: FrameId,
-    pub schema_node: SchemaNodeId,
-    pub parent: ParentTarget,
-    pub next_item_index: u64,
-    pub builder_mark: ArenaMark,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ObjectFrame {
-    pub id: FrameId,
-    pub schema_node: SchemaNodeId,
-    pub parent: ParentTarget,
-    pub phase: ObjectPhase,
-    pub current_key: Option<Vec<u8>>,
-    pub seen_keys: Vec<Vec<u8>>,
-    pub builder_mark: ArenaMark,
-    pub values: Vec<(Vec<u8>, CanonicalId)>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ObjectPhase {
-    KeyOrEnd,
-    Colon,
-    Value,
-    CommaOrEnd,
 }
 
 #[derive(Default)]

@@ -19,13 +19,13 @@ use crate::{Error, Result};
 ///
 /// For example these should be interpreted as:
 ///
-/// ``` ignore
+/// ```text
 /// "ĠO" = [U+0120, U+004F] => [0x20, 0x4F] = " O"
 /// "Ġal" = [U+0120, U+0061, U+006C] => [0x20, 0x61, 0x6C] = " al"
 /// ```
 /// We'll use the following the mapping for this translation:
 ///
-/// ``` ignore
+/// ```text
 /// 'Ā' == '\u{0100}' -> 0x00 == 0
 /// 'ā' == '\u{0101}' -> 0x01 == 1
 /// 'Ă' == '\u{0102}' -> 0x02 == 2

@@ -20,3 +20,12 @@ The exact decimal implementation was written for this repository. It
 does not contain copied Maskforge code. Compiler
 classification tests use the upstream JSON Schema Test Suite by pinned
 revision as test data; the suite is not distributed with the package.
+
+The JSON cursor owns generation-tagged frame identities and buffered
+container children. Schema dispatch and parent routing will be added with
+the authoritative semantic runtime instead of being represented by unused
+placeholder frame types.
+
+Debug replay currently compares committed token replay through the Index
+and a fresh cursor. Byte-DFA replay and accepting-boundary finish probes
+remain required when transactional runtime state is introduced.

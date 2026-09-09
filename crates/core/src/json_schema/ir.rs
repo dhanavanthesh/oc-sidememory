@@ -65,7 +65,7 @@ pub struct ScalarAssertions {
     pub enum_values: Vec<ScalarLiteral>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum ScalarLiteral {
     Null,
     Bool(bool),

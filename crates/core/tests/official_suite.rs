@@ -2,9 +2,11 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use oc_sidememory::json_schema::compile::{compile_ir, CompileOptions};
+use oc_sidememory::json_schema::compile::{compile_ir, compile_schema, CompileOptions};
 use oc_sidememory::json_schema::diagnostic::CompileError;
 use serde_json::Value;
+
+mod common;
 
 #[test]
 #[ignore = "requires OC_JSON_SCHEMA_TEST_SUITE"]
@@ -26,6 +28,11 @@ fn classify_official_draft_2020_12_schemas() {
     let mut groups = 0_usize;
     let mut cases = 0_usize;
     let mut classifications = BTreeMap::<&'static str, usize>::new();
+    let (vocabulary, model_width) = common::byte_vocabulary();
+    let mut structural_options = CompileOptions::default();
+    structural_options.compile_limits.max_regex_bytes = 512;
+    structural_options.profile.max_schema_depth = 1;
+    structural_options.runtime_limits.max_array_items = 256;
     for path in &files {
         let bytes = fs::read(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
         let document: Value = serde_json::from_slice(&bytes)
@@ -56,6 +63,16 @@ fn classify_official_draft_2020_12_schemas() {
                 Err(CompileError::InternalInvariant { .. }) => "unexpected-internal",
             };
             *classifications.entry(category).or_default() += 1;
+            if category == "supported" {
+                match compile_schema(&schema_bytes, &vocabulary, model_width, &structural_options) {
+                    Ok(_) | Err(CompileError::ResourceLimit(_)) => {}
+                    Err(error) => panic!(
+                        "{}: group {groups}: IR accepted but structural compilation failed: \
+                         {error:?}\nschema: {schema}",
+                        path.display()
+                    ),
+                }
+            }
         }
     }
 

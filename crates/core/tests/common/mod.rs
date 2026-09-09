@@ -14,6 +14,17 @@ pub fn ascii_vocabulary() -> (Vocabulary, usize) {
     (vocabulary, 129)
 }
 
+pub fn byte_vocabulary() -> (Vocabulary, usize) {
+    let eos = 256;
+    let mut vocabulary = Vocabulary::new(eos);
+    for byte in 0_u8..=u8::MAX {
+        vocabulary
+            .try_insert(vec![byte], u32::from(byte))
+            .expect("byte token");
+    }
+    (vocabulary, 257)
+}
+
 pub fn parse(bytes: &[u8]) -> JsonCursor {
     let mut cursor = JsonCursor::new(RuntimeLimits::default());
     cursor.feed_bytes(bytes).expect("valid JSON bytes");
