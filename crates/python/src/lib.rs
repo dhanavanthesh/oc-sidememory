@@ -4,9 +4,10 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use bincode::{config, Decode, Encode};
-use pyo3::exceptions::PyValueError;
+use pyo3::create_exception;
+use pyo3::exceptions::{PyException, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict};
+use pyo3::types::{PyAny, PyDict, PyMemoryView};
 use pyo3::wrap_pyfunction;
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 #[cfg(feature = "huggingface-hub")]
@@ -15,12 +16,222 @@ use tokenizers::FromPretrainedParameters;
 use oc_sidememory::index::Index;
 use oc_sidememory::json_schema;
 use oc_sidememory::prelude::*;
+use oc_sidememory::sidememory::{
+    GuideError as CoreGuideError, ProbeDecision, SemanticViolation as CoreSemanticViolation,
+    SequenceDecision,
+};
+
+create_exception!(oc_sidememory, OcSidememoryError, PyException);
+create_exception!(oc_sidememory, CompileError, OcSidememoryError);
+create_exception!(oc_sidememory, StructuralRejection, OcSidememoryError);
+create_exception!(oc_sidememory, SemanticViolation, OcSidememoryError);
+create_exception!(oc_sidememory, ResourceLimitError, OcSidememoryError);
+create_exception!(oc_sidememory, LifecycleError, OcSidememoryError);
+create_exception!(oc_sidememory, RollbackError, OcSidememoryError);
+create_exception!(oc_sidememory, InternalInvariantError, OcSidememoryError);
 
 const SERIALIZATION_MAGIC: &[u8; 3] = b"OCS";
 const SERIALIZATION_VERSION: u8 = 1;
 
 fn core_error(error: oc_sidememory::Error) -> PyErr {
     PyValueError::new_err(error.to_string())
+}
+
+fn guide_error(error: CoreGuideError) -> PyErr {
+    let message = error.to_string();
+    match error {
+        CoreGuideError::StructuralRejection { .. } | CoreGuideError::UnknownToken { .. } => {
+            StructuralRejection::new_err(message)
+        }
+        CoreGuideError::SemanticRejection(violation) => semantic_error(violation),
+        CoreGuideError::Resource(_)
+        | CoreGuideError::History(oc_sidememory::sidememory::HistoryError::Resource(_))
+        | CoreGuideError::Journal(oc_sidememory::sidememory::JournalError::Resource(_)) => {
+            ResourceLimitError::new_err(message)
+        }
+        CoreGuideError::InvalidLifecycle { .. } => LifecycleError::new_err(message),
+        CoreGuideError::RollbackUnavailable { .. } | CoreGuideError::Rollback(_) => {
+            RollbackError::new_err(message)
+        }
+        CoreGuideError::InternalInvariant { .. } | CoreGuideError::Poisoned { .. } => {
+            InternalInvariantError::new_err(message)
+        }
+        _ => OcSidememoryError::new_err(message),
+    }
+}
+
+fn semantic_error(violation: CoreSemanticViolation) -> PyErr {
+    let CoreSemanticViolation::DuplicateArrayItem {
+        frame,
+        constraint,
+        item_index,
+    } = violation;
+    let error = SemanticViolation::new_err("duplicate array item");
+    Python::attach(|py| {
+        let value = error.value(py);
+        let _ = value.setattr("category", "duplicate_array_item");
+        let _ = value.setattr("frame_slot", frame.slot);
+        let _ = value.setattr("frame_generation", frame.generation);
+        let _ = value.setattr("constraint", constraint.get());
+        let _ = value.setattr("item_index", item_index);
+    });
+    error
+}
+
+#[pyclass(name = "CompiledSchema", module = "oc_sidememory._native", frozen)]
+pub struct PyCompiledSchema {
+    inner: Arc<CompiledSchema>,
+}
+
+#[pymethods]
+impl PyCompiledSchema {
+    fn get_model_width(&self) -> usize {
+        self.inner.token_table().model_width()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "CompiledSchema(model_width={}, constraints={})",
+            self.inner.token_table().model_width(),
+            self.inner.memory_plan().unique_items().len()
+        )
+    }
+}
+
+#[pyfunction(name = "compile_schema")]
+fn compile_schema_py(
+    py: Python<'_>,
+    schema_json: &str,
+    vocabulary: &PyVocabulary,
+    model_width: usize,
+) -> PyResult<PyCompiledSchema> {
+    py.detach(|| {
+        oc_sidememory::compile_schema(
+            schema_json.as_bytes(),
+            &vocabulary.0,
+            model_width,
+            &CompileOptions::default(),
+        )
+        .map(|compiled| PyCompiledSchema {
+            inner: Arc::new(compiled),
+        })
+        .map_err(|error| CompileError::new_err(error.to_string()))
+    })
+}
+
+#[pyclass(name = "SidememoryGuide", module = "oc_sidememory._native")]
+pub struct PySidememoryGuide {
+    inner: Guide,
+}
+
+#[pymethods]
+impl PySidememoryGuide {
+    #[new]
+    #[pyo3(signature = (compiled, max_rollback=32))]
+    fn __new__(compiled: &PyCompiledSchema, max_rollback: usize) -> PyResult<Self> {
+        Guide::new(
+            Arc::clone(&compiled.inner),
+            GuideOptions {
+                max_rollback_tokens: max_rollback,
+                ..GuideOptions::default()
+            },
+        )
+        .map(|inner| Self { inner })
+        .map_err(guide_error)
+    }
+
+    fn get_state(&self) -> StateId {
+        self.inner.state_id()
+    }
+
+    fn get_tokens(&mut self) -> PyResult<Vec<TokenId>> {
+        self.inner.allowed_tokens().map_err(guide_error)
+    }
+
+    fn get_mask(&mut self) -> PyResult<Vec<u32>> {
+        let words = self.inner.model_width().div_ceil(32);
+        let mut mask = vec![0; words];
+        self.inner.write_mask(&mut mask).map_err(guide_error)?;
+        Ok(mask)
+    }
+
+    fn fill_mask(&mut self, buffer: &Bound<'_, PyAny>) -> PyResult<()> {
+        let view = PyMemoryView::from(buffer)?;
+        if view.getattr("readonly")?.extract::<bool>()? {
+            return Err(PyTypeError::new_err("mask buffer must be writable"));
+        }
+        if view.getattr("ndim")?.extract::<usize>()? != 1
+            || !view.getattr("c_contiguous")?.extract::<bool>()?
+        {
+            return Err(PyTypeError::new_err(
+                "mask buffer must be one-dimensional and contiguous",
+            ));
+        }
+        let format = view.getattr("format")?.extract::<String>()?;
+        if view.getattr("itemsize")?.extract::<usize>()? != 4 || format != "I" {
+            return Err(PyTypeError::new_err(
+                "mask buffer must use native unsigned 32-bit elements",
+            ));
+        }
+        let words = self.get_mask()?;
+        if view.len()? != words.len() {
+            return Err(PyValueError::new_err(format!(
+                "invalid mask buffer: expected {} words, got {}",
+                words.len(),
+                view.len()?
+            )));
+        }
+        for (index, word) in words.into_iter().enumerate() {
+            view.set_item(index, word)?;
+        }
+        Ok(())
+    }
+
+    fn probe(&mut self, token_id: TokenId) -> PyResult<bool> {
+        self.inner
+            .probe(token_id)
+            .map(|decision| decision == ProbeDecision::Allow)
+            .map_err(guide_error)
+    }
+
+    fn advance(&mut self, token_id: TokenId) -> PyResult<()> {
+        self.inner.advance(token_id).map_err(guide_error)
+    }
+
+    #[pyo3(signature = (count=1))]
+    fn rollback(&mut self, count: usize) -> PyResult<()> {
+        self.inner.rollback(count).map_err(guide_error)
+    }
+
+    fn reset(&mut self) -> PyResult<()> {
+        self.inner.reset().map_err(guide_error)
+    }
+
+    fn is_accepting(&mut self) -> PyResult<bool> {
+        self.inner.is_accepting().map_err(guide_error)
+    }
+
+    fn is_terminated(&self) -> bool {
+        self.inner.is_terminated()
+    }
+
+    fn get_allowed_rollback(&self) -> usize {
+        self.inner.rollback_available()
+    }
+
+    #[pyo3(signature = (tokens, finish=false))]
+    fn accepts_tokens(&mut self, tokens: Vec<TokenId>, finish: bool) -> PyResult<bool> {
+        self.inner
+            .probe_sequence(&tokens, finish)
+            .map(|decision| decision == SequenceDecision::Allow)
+            .map_err(guide_error)
+    }
+
+    fn __reduce__(&self) -> PyResult<()> {
+        Err(PyTypeError::new_err(
+            "Live SidememoryGuide serialization is not supported in version 0.1. Use the original schema, vocabulary identity, options and token trace.",
+        ))
+    }
 }
 
 fn encode_envelope<T: Encode>(value: &T, kind: u8) -> PyResult<Vec<u8>> {
@@ -546,6 +757,26 @@ fn native_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyIndex>()?;
     m.add_class::<PyVocabulary>()?;
     m.add_class::<PyGuide>()?;
+    m.add_class::<PyCompiledSchema>()?;
+    m.add_class::<PySidememoryGuide>()?;
+    m.add_function(wrap_pyfunction!(compile_schema_py, m)?)?;
+    m.add("OcSidememoryError", m.py().get_type::<OcSidememoryError>())?;
+    m.add("CompileError", m.py().get_type::<CompileError>())?;
+    m.add(
+        "StructuralRejection",
+        m.py().get_type::<StructuralRejection>(),
+    )?;
+    m.add("SemanticViolation", m.py().get_type::<SemanticViolation>())?;
+    m.add(
+        "ResourceLimitError",
+        m.py().get_type::<ResourceLimitError>(),
+    )?;
+    m.add("LifecycleError", m.py().get_type::<LifecycleError>())?;
+    m.add("RollbackError", m.py().get_type::<RollbackError>())?;
+    m.add(
+        "InternalInvariantError",
+        m.py().get_type::<InternalInvariantError>(),
+    )?;
     register_child_module(m)?;
 
     Ok(())
