@@ -1,0 +1,103 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "outlines_core"
+authors= [{name = "Outlines Developers"}]
+description = "Structured Text Generation in Rust"
+requires-python = ">=3.8"
+license = {text = "Apache-2.0"}
+keywords=[
+    "machine learning",
+    "deep learning",
+    "language models",
+    "structured generation",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+# TODO: remove when numba is supported on the free-threaded build
+test-without-numba = [
+    "pre-commit",
+    "pydantic",
+    "pytest",
+    "pytest-benchmark",
+    "pytest-cov",
+    "pytest-mock",
+    "coverage[toml]>=5.1",
+    "diff-cover",
+    "numpy",
+    "torch",
+    "scipy",
+    "asv",
+    "psutil",
+    "maturin[patchelf]",
+]
+
+test = [
+    "outlines_core[test-without-numba]",
+    "numba",
+]
+
+[project.urls]
+homepage = "https://github.com/dottxt-ai/outlines-core"
+documentation = "https://dottxt-ai.github.io/outlines-core/"
+repository = "https://github.com/dottxt-ai/outlines-core"
+
+[project.readme]
+file="README.md"
+content-type = "text/markdown"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    "error",
+    "ignore::pydantic.warnings.PydanticDeprecatedSince20",
+    "ignore::UserWarning",
+    "ignore::DeprecationWarning",
+]
+addopts = [
+    "--import-mode=importlib"
+]
+# provided by pytest-run-parallel but added here because
+# pytest-run-parallel isn't a required test dependency
+markers = [
+    "thread_unsafe: Mark a test as thread-unsafe under pytest-run-parallel",
+]
+
+ignore_missing_imports = true
+
+[tool.coverage.run]
+omit = [
+    "tests/*",
+]
+branch = true
+relative_files = true
+
+[tool.coverage.report]
+omit = [
+    "tests/*",
+]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "\\.\\.\\.",
+]
+show_missing = true
+
+[tool.diff_cover]
+compare_branch = "origin/main"
+diff_range_notation = ".."
+
+[tool.maturin]
+features = ["python-bindings"]
