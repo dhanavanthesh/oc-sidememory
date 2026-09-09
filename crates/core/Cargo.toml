@@ -1,0 +1,32 @@
+[package]
+name = "oc-sidememory"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Checked structured generation and exact side-memory foundations"
+
+[dependencies]
+bincode.workspace = true
+bitflags.workspace = true
+once_cell.workspace = true
+regex.workspace = true
+regex-automata.workspace = true
+rustc-hash.workspace = true
+serde.workspace = true
+serde-json.workspace = true
+thiserror.workspace = true
+tokenizers.workspace = true
+hf-hub = { version = "=0.4.1", features = ["ureq", "rustls-tls"], default-features = false, optional = true }
+
+[features]
+default = ["huggingface-hub"]
+huggingface-hub = ["hf-hub", "tokenizers/http", "tokenizers/rustls-tls"]
+hugginface-hub = ["huggingface-hub"]
+
+[lib]
+name = "oc_sidememory"
+
+[lints]
+workspace = true

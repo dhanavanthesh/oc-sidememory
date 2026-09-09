@@ -1,0 +1,20 @@
+[package]
+name = "oc-sidememory-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+oc-sidememory = { path = "../core", default-features = false }
+
+[[bin]]
+name = "convert-json-schema"
+path = "src/bin/convert-json-schema.rs"
+test = false
+bench = false
+
+[lints]
+workspace = true

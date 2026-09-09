@@ -1,0 +1,30 @@
+[package]
+name = "oc-sidememory-python"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+bincode.workspace = true
+oc-sidememory = { path = "../core", default-features = false }
+pyo3 = { workspace = true, features = ["generate-import-lib"] }
+rustc-hash.workspace = true
+serde-pyobject.workspace = true
+serde-json.workspace = true
+tokenizers.workspace = true
+
+[features]
+default = ["python-bindings"]
+python-bindings = []
+huggingface-hub = ["oc-sidememory/huggingface-hub"]
+hugginface-hub = ["huggingface-hub"]
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[lints]
+workspace = true

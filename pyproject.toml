@@ -3,9 +3,9 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "outlines_core"
-authors= [{name = "Outlines Developers"}]
-description = "Structured Text Generation in Rust"
+name = "oc-sidememory"
+authors = [{name = "OC-Sidememory contributors"}]
+description = "Checked structured generation with exact side-memory foundations"
 requires-python = ">=3.8"
 license = {text = "Apache-2.0"}
 keywords=[
@@ -45,14 +45,14 @@ test-without-numba = [
 ]
 
 test = [
-    "outlines_core[test-without-numba]",
+    "oc-sidememory[test-without-numba]",
     "numba",
 ]
 
 [project.urls]
-homepage = "https://github.com/dottxt-ai/outlines-core"
-documentation = "https://dottxt-ai.github.io/outlines-core/"
-repository = "https://github.com/dottxt-ai/outlines-core"
+homepage = "https://github.com/dhanavanthesh/oc-sidememory"
+documentation = "https://github.com/dhanavanthesh/oc-sidememory/tree/main/docs"
+repository = "https://github.com/dhanavanthesh/oc-sidememory"
 
 [project.readme]
 file="README.md"
@@ -100,4 +100,7 @@ compare_branch = "origin/main"
 diff_range_notation = ".."
 
 [tool.maturin]
+manifest-path = "crates/python/Cargo.toml"
+python-source = "."
+module-name = "oc_sidememory._native"
 features = ["python-bindings"]
