@@ -35,7 +35,7 @@
 //!
 //! `Outlines_core` is primarily used in structured text generation project [`outlines`](https://github.com/dottxt-ai/outlines),
 //! if you need support, consider reaching out to its maintainers, you can also open an issue or start a discussion
-//! on [github](https://github.com/dottxt-ai/outlines-core)
+//! on [github](https://github.com/dhanavanthesh/oc-sidememory)
 //!
 //! ## Example
 //!
@@ -87,7 +87,9 @@ pub mod index;
 pub mod json_schema;
 pub mod prelude;
 pub mod primitives;
+pub mod sidememory;
 pub mod vocabulary;
 
 pub use error::{Error, Result};
-
+pub use json_schema::compile::{compile_schema, CompileOptions, CompiledSchema};
+pub use vocabulary::Vocabulary;

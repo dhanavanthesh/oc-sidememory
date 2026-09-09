@@ -102,7 +102,13 @@
 use serde_json::Value;
 pub use types::*;
 
+pub mod compile;
+pub mod diagnostic;
+pub mod ir;
 mod legacy;
+mod memory_keywords;
+pub mod profile;
+mod structural;
 pub mod types;
 
 use crate::Result;
