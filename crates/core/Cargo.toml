@@ -3,9 +3,22 @@ name = "oc-sidememory"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+license-file = "../../LICENSE"
 repository.workspace = true
-description = "Checked structured generation and exact side-memory foundations"
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+description = "Transactional semantic constraints for structured token generation"
+keywords = ["llm", "json-schema", "decoding", "parser", "inference"]
+categories = ["parsing", "text-processing", "development-tools"]
+include = [
+    "src/**",
+    "benches/**",
+    "tests/**",
+    "NOTICE",
+    "PROVENANCE.md",
+    "MODIFICATIONS.md",
+]
 
 [dependencies]
 bincode.workspace = true
@@ -30,3 +43,15 @@ name = "oc_sidememory"
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "semantic_masks"
+harness = false
+
+[[bench]]
+name = "semantic_transitions"
+harness = false
+
+[[bench]]
+name = "semantic_memory"
+harness = false
