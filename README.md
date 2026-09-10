@@ -1,61 +1,82 @@
+<div align="center">
+
 # OC-Sidememory
 
-OC-Sidememory is a Rust and Python constrained-decoding engine that refines structural token masks with exact, rollback-safe JSON semantic constraints.
+**Exact semantic memory for schema-constrained token generation in Rust and Python.**
+
+[![PyPI](https://img.shields.io/pypi/v/oc-sidememory.svg)](https://pypi.org/project/oc-sidememory/)
+[![crates.io](https://img.shields.io/crates/v/oc-sidememory.svg)](https://crates.io/crates/oc-sidememory)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
+</div>
+
+OC-Sidememory combines a byte-level DFA with transactional semantic state. The DFA checks JSON
+structure. The semantic guide tracks completed values, contains counters, captures, and immutable
+membership sets.
+
+For guide state $\sigma$, token $x$, DFA decision $D$, and semantic decision $S$:
+
+```math
+A(\sigma,x)=D(\sigma,x)\land S(\sigma,x)
+```
+
+The semantic layer can remove structurally valid candidates, but it cannot add new candidates:
+
+```math
+M_{OC}=M_{DFA}\land\neg M_{deny}
+```
 
 ## Features
 
-- Checked compilation of a documented JSON Schema Draft 2020-12 subset.
-- Generation-time `uniqueItems`, `contains`, `minContains`, and `maxContains`.
-- Versioned opt-in capture equality and immutable imported membership.
-- Exact JSON equality for numbers, strings, arrays, and objects.
-- Atomic probe and advance, EOS, reset, and bounded token rollback.
-- A Rust semantic authority, thin Python adapter, and JSON CLI.
+| Capability | Behavior |
+| --- | --- |
+| `uniqueItems` | Rejects an exact duplicate in the current array instance |
+| `contains` | Enforces `minContains` and `maxContains` over completed direct items |
+| Captures | Compares a later property with an earlier property in declared order |
+| Imported membership | Checks values against immutable, versioned sets |
+| Exact equality | Handles numbers, decoded strings, arrays, and order-independent objects |
+| Transactions | Makes probes pure and rejected advances atomic |
+| Rollback | Restores bounded token checkpoints, including EOS |
 
-Unsupported combinations fail compilation. See the [supported profile](docs/supported-profile.md) and [limitations](docs/limitations.md).
+Unsupported schema combinations fail during compilation. See the
+[supported profile](docs/supported-profile.md) and [limitations](docs/limitations.md).
 
 ## Installation
 
-### Python
+Python:
 
 ```bash
 pip install oc-sidememory
 ```
 
-Installing a supported wheel does not require Rust, Cargo, maturin, or a C/C++ compiler.
-
-### Rust
+Rust:
 
 ```bash
 cargo add oc-sidememory
 ```
 
-The core crate links independently. Python bindings are built by the separate workspace adapter.
+From a checkout:
 
-### From source
-
-To build the Python package from a source checkout:
-
-```console
+```bash
 uv sync
 uv run maturin develop --release
 ```
 
-To use the Rust crate directly from a source checkout:
+## Python example
 
-```toml
-[dependencies]
-oc-sidememory = { path = "crates/core", default-features = false }
-```
-
-## Python quick start
+Build the vocabulary from a normal Transformers tokenizer. Compile the schema once, then create one
+guide for each generation sequence.
 
 ```python
 import json
+
 import oc_sidememory
 from transformers import AutoTokenizer
 
-tokenizer = AutoTokenizer.from_pretrained("gpt2", local_files_only=True)
+
+tokenizer = AutoTokenizer.from_pretrained("openai-community/gpt2")
 vocabulary = oc_sidememory.Vocabulary.from_transformers(tokenizer)
+
 schema = {
     "type": "array",
     "items": {"type": "string", "enum": ["red", "green", "blue"]},
@@ -63,73 +84,121 @@ schema = {
     "maxItems": 3,
     "uniqueItems": True,
 }
+
 compiled = oc_sidememory.compile_schema(
     json.dumps(schema), vocabulary, tokenizer.vocab_size
 )
 guide = oc_sidememory.SidememoryGuide(compiled, max_rollback=32)
-tokens = tokenizer.encode('["red","red","blue"]', add_special_tokens=False)
-assert not guide.accepts_tokens(tokens, finish=True)
+
+valid = tokenizer.encode('["red","green","blue"]', add_special_tokens=False)
+duplicate = tokenizer.encode('["red","red","blue"]', add_special_tokens=False)
+
+assert guide.accepts_tokens(valid, finish=True)
+assert not guide.accepts_tokens(duplicate, finish=True)
 ```
 
-The public Python examples pin GPT-2 revision `607a30d783dfa663caf39e06633721c8d4cfcd7e`, force offline loading, and never download silently. The revision is a public model version, not a credential.
+`accepts_tokens`, `probe`, `advance`, and mask construction use the same Rust transition routine.
+Python does not contain a second semantic validator.
 
-## Rust example
+## How uniqueness changes a mask
 
-Buildable programs using the public API are in [examples](examples/README.md). They use deterministic byte vocabularies and require no network or model.
+After completing `"red"` in a unique array:
 
-## Architecture and guarantees
+| Layer | Next item candidates |
+| --- | --- |
+| Structural DFA | `"red"`, `"green"`, `"blue"` |
+| Semantic guide | `"green"`, `"blue"` |
 
-The DFA remains authoritative for structure. Semantics may only remove candidates:
+The duplicate is removed before sampling. A direct attempt to advance it is rejected by the same
+semantic transition.
+
+## Exact guarantees
+
+Let $C(v)$ be the canonical value of $v$, and let $H_a$ be the history of live array instance $a$.
+Uniqueness admits $v$ exactly when:
 
 ```math
-\operatorname{Allowed}(\sigma,x)=
-\operatorname{DFAAllowed}(q,x)\land
-\operatorname{SemanticAllowed}(\sigma,x)
+U(v)\iff C(v)\notin H_a
+```
+
+For predicate $P$, contains counts matching completed direct items:
+
+```math
+c_a=\sum_{i=1}^{n}\mathbf{1}[P(v_i)],\qquad l\le c_a\le u
+```
+
+Equality and imported membership use canonical values, not raw JSON spelling or fingerprints:
+
+```math
+E(v,r)\iff C(v)=C(r)
 ```
 
 ```math
-M_{\mathrm{OC}}=M_{\mathrm{DFA}}\land\neg M_{\mathrm{deny}}
+I(v,S)\iff C(v)\in S
 ```
 
-Probe, mask, direct advance, sequence checking, and EOS use one byte-by-byte Rust transition. An outer transaction covers the cursor, router, canonical arena, histories, counters, registers, lifecycle, and trace.
+A probe leaves logical state unchanged:
 
 ```math
-\operatorname{admit}(v)\iff\operatorname{canon}(v)\notin H_a
+P_x(\sigma)=\sigma
 ```
+
+Rolling back $k$ committed token transitions restores the earlier logical state:
 
 ```math
-c_a=\sum_{i=1}^{n}\mathbf{1}[\operatorname{Validate}(v_i,P)],\qquad l\le c_a\le u
+R_k(T_{x_k}(\cdots T_{x_1}(\sigma)))=\sigma
 ```
 
-```math
-\operatorname{StateAfterProbe}(\sigma,x)=\sigma
+Revision counters and retained allocation capacity are not part of logical state equality.
+
+## Command-line interface
+
+```bash
+oc-sidememory capabilities
+oc-sidememory compile --schema schema.json --vocabulary vocabulary.json
+oc-sidememory check --schema schema.json --vocabulary vocabulary.json \
+  --tokens tokens.json --finish
 ```
 
-Monotonic revision counters and retained allocation capacity are excluded from logical state equality. See [architecture](docs/architecture.md), [Rust API](docs/rust-api.md), and [Python API](docs/python-api.md).
-
-## Extensions and imports
-
-Cross-field relations are an explicit version 1 generation extension, not standard JSON Schema. An extension-bearing object declares property order and may capture an earlier direct property for equality or inequality. Membership relations query immutable, identity-versioned imported sets. See [extensions](docs/extensions-v1.md) and [imported memory](docs/imported-memory.md).
-
-## CLI
-
-The `oc-sidememory` binary provides `compile`, `tokens`, `mask`, `check`, `inspect-imports`, and `capabilities`. Inputs and outputs are versioned JSON; token bytes use base64. See the [CLI reference](docs/cli.md).
+Commands emit versioned JSON. Vocabulary files store token bytes as base64, so token data does not
+need to be UTF-8. See the [CLI reference](docs/cli.md).
 
 ## Performance
 
-The semantic engine uses journaled mutation instead of cloning complete guide state. Initial local measurements and denominators are in [performance](docs/performance.md). A candidate-buffer experiment was removed after it regressed representative p95 mask latency. No universal speedup or zero-overhead claim is made.
+Mask latency depends on candidate count, token bytes, emitted events, predicate work, equality work,
+and current semantic history. Recorded release-mode measurements and their environment are in
+[docs/performance.md](docs/performance.md). They are engineering measurements, not universal
+throughput claims.
+
+## Documentation
+
+| Guide | Subject |
+| --- | --- |
+| [Architecture](docs/architecture.md) | Ownership, transitions, journals, and rollback |
+| [Python API](docs/python-api.md) | Compilation, guides, imports, masks, and exceptions |
+| [Rust API](docs/rust-api.md) | Core construction, lifecycle, and error types |
+| [Extensions v1](docs/extensions-v1.md) | Ordered captures and relations |
+| [Imported memory](docs/imported-memory.md) | Identity, canonicalization, and lifetime |
+| [Supported profile](docs/supported-profile.md) | Implemented schema surface |
+| [Limitations](docs/limitations.md) | Explicit boundaries and non-goals |
+
+The [example ladder](examples/README.md) covers uniqueness, contains, capture equality, imported
+membership, and composed rollback using public APIs.
 
 ## Development
 
-```console
+```bash
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 uv run pytest -q
 ```
 
-Deterministic correctness tests require no model or network. Cached-model examples are demonstrations, not correctness oracles.
+Deterministic correctness tests require no model or network. See [CONTRIBUTING.md](CONTRIBUTING.md)
+and [SECURITY.md](SECURITY.md).
 
 ## Provenance and license
 
-OC-Sidememory is independently developed from an Apache-2.0 outlines-core source import and is not endorsed by that project. See [provenance](PROVENANCE.md), [modifications](MODIFICATIONS.md), [NOTICE](NOTICE), and [LICENSE](LICENSE).
+OC-Sidememory is independently developed from an Apache-2.0 `outlines-core` source import and is
+not endorsed by its upstream authors. See [PROVENANCE.md](PROVENANCE.md),
+[MODIFICATIONS.md](MODIFICATIONS.md), [NOTICE](NOTICE), and [LICENSE](LICENSE).
