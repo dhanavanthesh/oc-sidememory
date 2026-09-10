@@ -1,0 +1,25 @@
+{
+  "formatVersion": 1,
+  "modelWidth": 32,
+  "eosTokenId": 31,
+  "tokens": [
+    {"id": 0, "bytesBase64": "WyJhIiwiYiJd"},
+    {"id": 1, "bytesBase64": "WyJhIiwiYSJd"},
+    {"id": 2, "bytesBase64": "WzEsMl0="},
+    {"id": 3, "bytesBase64": "WzIsMl0="},
+    {"id": 4, "bytesBase64": "eyJpZCI6MSwiY29uZmlybWF0aW9uIjoxLjB9"},
+    {"id": 5, "bytesBase64": "eyJpZCI6MSwiY29uZmlybWF0aW9uIjoyfQ=="},
+    {"id": 6, "bytesBase64": "eyJjdXN0b21lciI6ImN1c3RfNyJ9"},
+    {"id": 7, "bytesBase64": "eyJjdXN0b21lciI6ImN1c3RfOCJ9"},
+    {"id": 8, "bytesBase64": "Ww=="},
+    {"id": 9, "bytesBase64": "ImEi"},
+    {"id": 10, "bytesBase64": "LCJiIg=="},
+    {"id": 11, "bytesBase64": "LCJhIg=="},
+    {"id": 12, "bytesBase64": "XQ=="},
+    {"id": 13, "bytesBase64": "WyJhIiwiYiJd"},
+    {"id": 14, "bytesBase64": "MQ=="},
+    {"id": 15, "bytesBase64": "Mg=="},
+    {"id": 16, "bytesBase64": "LDE="},
+    {"id": 17, "bytesBase64": "LDI="}
+  ]
+}

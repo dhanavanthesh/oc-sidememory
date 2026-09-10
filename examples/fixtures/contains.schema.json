@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "items": {"type": "integer", "enum": [1, 2]},
+  "minItems": 2,
+  "maxItems": 2,
+  "contains": {"const": 1},
+  "minContains": 1,
+  "maxContains": 1
+}

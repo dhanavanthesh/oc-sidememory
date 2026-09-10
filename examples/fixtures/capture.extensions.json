@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "objects": [{
+    "schemaPath": "$",
+    "propertyOrder": ["id", "confirmation"],
+    "captures": [{"name": "primary", "sourceProperty": "id"}],
+    "relations": [{
+      "targetProperty": "confirmation",
+      "operator": "equal",
+      "capture": "primary"
+    }]
+  }]
+}

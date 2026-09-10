@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "objects": [{
+    "schemaPath": "$",
+    "propertyOrder": ["customer"],
+    "relations": [{
+      "targetProperty": "customer",
+      "operator": "memberOf",
+      "import": "valid_customers"
+    }]
+  }]
+}

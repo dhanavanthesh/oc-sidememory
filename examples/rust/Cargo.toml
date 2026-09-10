@@ -1,0 +1,30 @@
+[package]
+name = "oc-sidememory-examples"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+oc-sidememory = { path = "../../crates/core", default-features = false }
+
+[[bin]]
+name = "unique-items"
+path = "01_unique_items.rs"
+
+[[bin]]
+name = "contains"
+path = "02_contains.rs"
+
+[[bin]]
+name = "capture-equality"
+path = "03_capture_equality.rs"
+
+[[bin]]
+name = "imported-membership"
+path = "04_imported_membership.rs"
+
+[[bin]]
+name = "composed-rollback"
+path = "05_composed_rollback.rs"
