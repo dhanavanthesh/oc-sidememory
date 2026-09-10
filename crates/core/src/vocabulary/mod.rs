@@ -3,12 +3,9 @@
 use bincode::{Decode, Encode};
 #[cfg(feature = "huggingface-hub")]
 use locator::{HFLocator, Locator};
-#[cfg(feature = "huggingface-hub")]
 use processor::TokenProcessor;
 use rustc_hash::FxHashMap as HashMap;
-#[cfg(feature = "huggingface-hub")]
 use tokenizers::normalizers::Sequence;
-#[cfg(feature = "huggingface-hub")]
 use tokenizers::{NormalizerWrapper, Tokenizer};
 
 use crate::prelude::*;
@@ -16,7 +13,6 @@ use crate::{Error, Result};
 
 #[cfg(feature = "huggingface-hub")]
 mod locator;
-#[cfg(feature = "huggingface-hub")]
 mod processor;
 
 /// `Vocabulary` of large language model.
@@ -93,10 +89,7 @@ impl Vocabulary {
         model: &str,
         parameters: Option<FromPretrainedParameters>,
     ) -> Result<Self> {
-        let mut tokenizer = Tokenizer::from_pretrained(model, parameters.clone())?;
-        Self::filter_prepend_normalizers(&mut tokenizer);
-
-        // Locate eos_token_id in defined locations.
+        let tokenizer = Tokenizer::from_pretrained(model, parameters.clone())?;
         let eos_token_id = L::locate_eos_token_id(model, &tokenizer, &parameters);
         let Some(eos_token_id) = eos_token_id else {
             return Err(Error::UnsupportedTokenizer {
@@ -104,8 +97,12 @@ impl Vocabulary {
                 reason: "EOS token id".to_string(),
             });
         };
+        Self::from_tokenizer(tokenizer, eos_token_id)
+    }
 
-        // Start building the vocabulary from eos_token_id and added tokens.
+    /// Builds a processed vocabulary from an already loaded tokenizer.
+    pub fn from_tokenizer(mut tokenizer: Tokenizer, eos_token_id: TokenId) -> Result<Self> {
+        Self::filter_prepend_normalizers(&mut tokenizer);
         let mut vocabulary = Vocabulary::new(eos_token_id);
         for (id, added_token) in tokenizer.get_added_tokens_decoder().iter() {
             if !added_token.special && id != &eos_token_id {
@@ -116,7 +113,7 @@ impl Vocabulary {
         // Process each vocabulary token according to the tokenizer's level.
         let Ok(processor) = TokenProcessor::new(&tokenizer) else {
             return Err(Error::UnsupportedTokenizer {
-                model: model.to_string(),
+                model: "loaded tokenizer".to_string(),
                 reason: "Token processor".to_string(),
             });
         };
@@ -171,7 +168,6 @@ impl Vocabulary {
     }
 
     /// Filters out `Prepend` kind of tokenizer's normalizers.
-    #[cfg(feature = "huggingface-hub")]
     fn filter_prepend_normalizers(tokenizer: &mut Tokenizer) {
         // Main concern is prepend normalizers, for example https://github.com/google/sentencepiece
         // In `sentencepiece` tokenizer, `▁` is used to denote spaces in the source text,
