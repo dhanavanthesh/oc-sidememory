@@ -1,12 +1,8 @@
 name: Publish Python package
 
 on:
-  workflow_dispatch:
-    inputs:
-      confirmation:
-        description: Enter publish-vX.Y.Z for the selected tag
-        required: true
-        type: string
+  push:
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -21,7 +17,6 @@ jobs:
       - id: version
         shell: python
         env:
-          CONFIRMATION: ${{ inputs.confirmation }}
           RELEASE_REF: ${{ github.ref }}
         run: |
           import os
@@ -32,9 +27,7 @@ jobs:
           version = manifest["workspace"]["package"]["version"]
           tag = f"v{version}"
           if os.environ["RELEASE_REF"] != f"refs/tags/{tag}":
-              raise SystemExit(f"Select the {tag} tag when starting this workflow")
-          if os.environ["CONFIRMATION"] != f"publish-{tag}":
-              raise SystemExit(f"Confirmation must be publish-{tag}")
+              raise SystemExit(f"Release tag must be {tag}")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"version={version}\n")
 
@@ -84,8 +77,23 @@ jobs:
           path: dist/*.tar.gz
           if-no-files-found: error
 
+  crates-io:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: crates-io
+      url: https://crates.io/crates/oc-sidememory
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: stable
+      - run: cargo publish -p oc-sidememory --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
   publish:
-    needs: [verify, wheels, sdist]
+    needs: [verify, wheels, sdist, crates-io]
     runs-on: ubuntu-latest
     environment:
       name: pypi
