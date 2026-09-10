@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use oc_sidememory::json_schema::extensions::ExtensionPlanV1;
 use oc_sidememory::sidememory::{verify_guide_replay, Guide, GuideOptions, ProbeDecision};
 use oc_sidememory::{compile_schema, CompileOptions, Vocabulary};
 
@@ -77,4 +78,38 @@ fn replay_matches_nested_uniqueness_histories_by_value() {
     }
     decoder.rollback(2).unwrap();
     verify_guide_replay(&decoder).unwrap();
+}
+
+#[test]
+fn replay_matches_live_and_closed_capture_registers() {
+    let mut vocabulary = Vocabulary::new(128);
+    for byte in 0_u8..=127 {
+        vocabulary.try_insert(vec![byte], u32::from(byte)).unwrap();
+    }
+    let schema = br#"{
+        "type":"object",
+        "properties":{"source":{"type":"string"},"target":{"type":"string"}},
+        "required":["source","target"],
+        "additionalProperties":false
+    }"#;
+    let extension = ExtensionPlanV1::from_json(
+        r#"{"version":1,"objects":[{"schemaPath":"$","propertyOrder":["source","target"],"captures":[{"name":"saved","sourceProperty":"source"}],"relations":[{"targetProperty":"target","operator":"equal","capture":"saved"}]}]}"#,
+    )
+    .unwrap();
+    let options = CompileOptions {
+        extension_plan: Some(extension),
+        ..CompileOptions::default()
+    };
+    let compiled = Arc::new(compile_schema(schema, &vocabulary, 129, &options).unwrap());
+    let mut guide = Guide::new(compiled, GuideOptions::default()).unwrap();
+    for byte in br#"{"source":"x","#.iter().copied() {
+        guide.advance(u32::from(byte)).unwrap();
+    }
+    verify_guide_replay(&guide).unwrap();
+    for byte in br#""target":"x"}"#.iter().copied() {
+        guide.advance(u32::from(byte)).unwrap();
+    }
+    verify_guide_replay(&guide).unwrap();
+    guide.rollback(1).unwrap();
+    verify_guide_replay(&guide).unwrap();
 }
