@@ -8,6 +8,9 @@ edition = "2021"
 rust-version = "1.85.0"
 license = "Apache-2.0"
 repository = "https://github.com/dhanavanthesh/oc-sidememory"
+homepage = "https://github.com/dhanavanthesh/oc-sidememory"
+documentation = "https://docs.rs/oc-sidememory"
+readme = "README.md"
 
 [workspace.dependencies]
 bincode = "2.0.1"

@@ -1,0 +1,29 @@
+name: Release dry run
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: stable
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - run: cargo package -p oc-sidememory
+      - run: cargo publish -p oc-sidememory --dry-run
+      - run: python -m pip install maturin twine
+      - run: maturin build --release --sdist --out dist
+      - run: twine check --strict dist/*
+
+  note:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Dry run only. This workflow contains no registry upload step."
