@@ -3,9 +3,12 @@ use thiserror::Error;
 
 use crate::json_schema::ir::SchemaNodeId;
 
+use super::counter::{ContainsState, CounterKey};
 use super::history::{CanonicalSet, HistoryKey, HistoryStore};
 use super::limits::ResourceError;
+use super::register::{RegisterKey, RegisterScope};
 use super::router::{RuntimeFrame, SemanticRouter};
+use super::state::SemanticState;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SemanticJournalMark(pub(crate) usize);
@@ -32,6 +35,28 @@ pub(crate) enum SemanticUndo {
         previous_len: usize,
         bucket_was_created: bool,
         previous_item_count: usize,
+    },
+    RemoveCreatedCounter {
+        key: CounterKey,
+    },
+    RestoreCounter {
+        key: CounterKey,
+        previous: ContainsState,
+    },
+    RestoreClosedCounter {
+        key: CounterKey,
+        state: ContainsState,
+    },
+    RemoveCreatedRegisterScope {
+        object: super::FrameId,
+    },
+    RestoreRegister {
+        key: RegisterKey,
+        previous: Option<super::CanonicalId>,
+    },
+    RestoreClosedRegisterScope {
+        object: super::FrameId,
+        scope: RegisterScope,
     },
 }
 
@@ -77,6 +102,21 @@ impl SemanticJournal {
         Ok(())
     }
 
+    pub(crate) fn restore_state(
+        &mut self,
+        mark: SemanticJournalMark,
+        semantic: &mut SemanticState,
+    ) -> Result<(), JournalError> {
+        if mark.0 > self.undo.len() {
+            return Err(JournalError::InvalidMark);
+        }
+        while self.undo.len() > mark.0 {
+            let undo = self.undo.pop().ok_or(JournalError::InvalidMark)?;
+            semantic.undo(undo)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn discard_prefix(&mut self, count: usize) -> Result<(), JournalError> {
         if count > self.undo.len() {
             return Err(JournalError::InvalidMark);
@@ -104,6 +144,9 @@ impl SemanticJournal {
         records.iter().try_fold(base, |total, undo| {
             let dynamic = match undo {
                 SemanticUndo::RestoreClosedHistory { history, .. } => history.retained_bytes()?,
+                SemanticUndo::RestoreClosedRegisterScope { scope, .. } => {
+                    super::register::retained_scope_bytes(scope)?
+                }
                 _ => 0,
             };
             total

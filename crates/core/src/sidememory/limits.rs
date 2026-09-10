@@ -51,6 +51,12 @@ pub struct GuideLimits {
     pub max_candidate_bytes_per_mask: usize,
     pub max_equality_checks_per_mask: usize,
     pub max_debug_trace_tokens: usize,
+    pub max_active_counters: usize,
+    pub max_predicate_steps: usize,
+    pub max_predicate_depth: usize,
+    pub max_predicate_equality_checks: usize,
+    pub max_register_scopes: usize,
+    pub max_register_values: usize,
 }
 
 impl Default for GuideLimits {
@@ -67,6 +73,12 @@ impl Default for GuideLimits {
             max_candidate_bytes_per_mask: 64 << 20,
             max_equality_checks_per_mask: 1_000_000,
             max_debug_trace_tokens: 1_000_000,
+            max_active_counters: 4096,
+            max_predicate_steps: 1_000_000,
+            max_predicate_depth: 128,
+            max_predicate_equality_checks: 1_000_000,
+            max_register_scopes: 4096,
+            max_register_values: 65_536,
         }
     }
 }
