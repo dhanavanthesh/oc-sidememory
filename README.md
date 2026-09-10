@@ -15,14 +15,26 @@ Unsupported combinations fail compilation. See the [supported profile](docs/supp
 
 ## Installation
 
-The project is not published to crates.io or PyPI. Build from a checkout:
+Install the Python package from PyPI:
+
+```console
+python -m pip install oc-sidememory
+```
+
+Add the Rust crate from crates.io:
+
+```console
+cargo add oc-sidememory
+```
+
+To build the Python package from a source checkout:
 
 ```console
 uv sync
 uv run maturin develop --release
 ```
 
-For Rust, use a path dependency until publication is authorized:
+To use the Rust crate directly from a source checkout:
 
 ```toml
 [dependencies]
