@@ -799,6 +799,22 @@ impl PyVocabulary {
         Ok(PyVocabulary(v))
     }
 
+    /// Creates a vocabulary from a loaded Transformers fast tokenizer.
+    #[staticmethod]
+    fn from_transformers(tokenizer: &Bound<'_, PyAny>) -> PyResult<PyVocabulary> {
+        let eos_token_id = tokenizer
+            .getattr("eos_token_id")?
+            .extract::<Option<TokenId>>()?
+            .ok_or_else(|| PyValueError::new_err("tokenizer.eos_token_id must be set"))?;
+        let backend = tokenizer.getattr("backend_tokenizer")?;
+        let json = backend.call_method0("to_str")?.extract::<String>()?;
+        let tokenizer = tokenizers::Tokenizer::from_bytes(json.as_bytes())
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Vocabulary::from_tokenizer(tokenizer, eos_token_id)
+            .map(PyVocabulary)
+            .map_err(core_error)
+    }
+
     /// Inserts new token with token_id or extends list of token_ids if token already present.
     fn insert(&mut self, py: Python<'_>, token: Py<PyAny>, token_id: TokenId) -> PyResult<()> {
         if let Ok(t) = token.extract::<String>(py) {

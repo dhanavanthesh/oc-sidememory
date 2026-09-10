@@ -100,6 +100,28 @@ def test_from_pretrained():
     assert vocabulary.get_eos_token_id() == 50256
 
 
+def test_from_transformers_fast_tokenizer():
+    tokenizers = pytest.importorskip("tokenizers")
+    transformers = pytest.importorskip("transformers")
+    backend = tokenizers.Tokenizer(
+        tokenizers.models.WordLevel(
+            {"[UNK]": 0, "a": 1, "[EOS]": 2},
+            unk_token="[UNK]",
+        )
+    )
+    backend.decoder = tokenizers.decoders.ByteLevel()
+    tokenizer = transformers.PreTrainedTokenizerFast(
+        tokenizer_object=backend,
+        unk_token="[UNK]",
+        eos_token="[EOS]",
+    )
+
+    vocabulary = Vocabulary.from_transformers(tokenizer)
+
+    assert vocabulary.get_eos_token_id() == 2
+    assert vocabulary.get("a") == [1]
+
+
 def test_pickling(vocabulary):
     serialized = pickle.dumps(vocabulary)
     deserialized = pickle.loads(serialized)
