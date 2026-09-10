@@ -15,17 +15,23 @@ Unsupported combinations fail compilation. See the [supported profile](docs/supp
 
 ## Installation
 
-Install the Python package from PyPI:
+### Python
 
-```console
-python -m pip install oc-sidememory
+```bash
+pip install oc-sidememory
 ```
 
-Add the Rust crate from crates.io:
+Installing a supported wheel does not require Rust, Cargo, maturin, or a C/C++ compiler.
 
-```console
+### Rust
+
+```bash
 cargo add oc-sidememory
 ```
+
+The core crate links independently. Python bindings are built by the separate workspace adapter.
+
+### From source
 
 To build the Python package from a source checkout:
 
