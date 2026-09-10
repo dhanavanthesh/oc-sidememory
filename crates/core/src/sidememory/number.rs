@@ -80,6 +80,10 @@ impl CanonicalNumber {
     pub fn exponent(&self) -> &str {
         &self.exponent
     }
+
+    pub fn is_integer(&self) -> bool {
+        !self.exponent.starts_with('-')
+    }
 }
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]

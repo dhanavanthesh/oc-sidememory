@@ -101,6 +101,40 @@ impl<S: std::hash::BuildHasher> CanonicalSet<S> {
         Ok(false)
     }
 
+    pub(crate) fn contains_across_with_scratch(
+        &self,
+        stored_arena: &CanonicalArena,
+        candidate_arena: &CanonicalArena,
+        value: CanonicalId,
+        scratch: &mut EqualityScratch,
+    ) -> Result<bool, ArenaError> {
+        let fingerprint = candidate_arena.fingerprint(value, &self.hash_builder)?;
+        let Some(bucket) = self.buckets.get(&fingerprint) else {
+            return Ok(false);
+        };
+        for candidate in bucket {
+            if stored_arena.equal_across_with_scratch(
+                *candidate,
+                candidate_arena,
+                value,
+                scratch,
+            )? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    pub fn contains_across(
+        &self,
+        stored_arena: &CanonicalArena,
+        candidate_arena: &CanonicalArena,
+        value: CanonicalId,
+    ) -> Result<bool, ArenaError> {
+        let mut scratch = EqualityScratch::default();
+        self.contains_across_with_scratch(stored_arena, candidate_arena, value, &mut scratch)
+    }
+
     pub fn insert(
         &mut self,
         arena: &CanonicalArena,
@@ -592,6 +626,7 @@ impl HistoryStore {
                 }
                 self.item_count = previous_item_count;
             }
+            _ => return Err(JournalError::Invariant),
         }
         Ok(())
     }

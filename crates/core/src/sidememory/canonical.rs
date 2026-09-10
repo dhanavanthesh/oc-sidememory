@@ -192,6 +192,22 @@ impl CanonicalArena {
         slice(&self.bytes, span.start, span.len).ok_or(ArenaError::InvalidSpan)
     }
 
+    pub(crate) fn array_values(&self, span: ChildSpan) -> Result<&[CanonicalId], ArenaError> {
+        slice(&self.children, span.start, span.len).ok_or(ArenaError::InvalidSpan)
+    }
+
+    pub(crate) fn object_entries(&self, span: EntrySpan) -> Result<&[ObjectEntry], ArenaError> {
+        slice(&self.entries, span.start, span.len).ok_or(ArenaError::InvalidSpan)
+    }
+
+    pub(crate) fn object_key(&self, entry: ObjectEntry) -> Result<&[u8], ArenaError> {
+        self.string_bytes(entry.key)
+    }
+
+    pub(crate) fn object_value(&self, entry: ObjectEntry) -> CanonicalId {
+        entry.value
+    }
+
     pub fn equal(&self, left: CanonicalId, right: CanonicalId) -> Result<bool, ArenaError> {
         self.equal_across(left, self, right)
     }
@@ -215,7 +231,7 @@ impl CanonicalArena {
         self.equal_across_with_scratch(left, self, right, scratch)
     }
 
-    fn equal_across_with_scratch(
+    pub(crate) fn equal_across_with_scratch(
         &self,
         left: CanonicalId,
         other: &CanonicalArena,
