@@ -5,14 +5,18 @@ use thiserror::Error;
 use crate::json_schema::compile::CompiledSchema;
 use crate::primitives::{StateId, TokenId};
 
+use super::canonical::ArenaError;
 use super::canonical::EqualityScratch;
+use super::counter::CounterError;
 use super::cursor::{CursorError, CursorJournal};
 use super::history::HistoryError;
+use super::imports::{ImportError, ImportedMemory};
 use super::journal::{JournalError, RouterJournal, SemanticJournal};
 use super::limits::{GuideLimits, ResourceError};
+use super::register::RegisterError;
 use super::rollback::{RollbackError, RollbackWindow, TokenMark};
 use super::router::{RouterError, SemanticRouter};
-use super::state::{GuideState, Lifecycle, ResourceLedger};
+use super::state::{GuideState, Lifecycle, ResourceLedger, SemanticState};
 use super::token_table::VocabularyError;
 use super::JsonEvent;
 
@@ -34,6 +38,7 @@ impl Default for GuideOptions {
 
 pub struct Guide {
     pub(crate) compiled: Arc<CompiledSchema>,
+    pub(crate) imports: Option<Arc<ImportedMemory>>,
     pub(crate) state: GuideState,
     pub(crate) cursor_journal: CursorJournal,
     pub(crate) semantic_journal: SemanticJournal,
@@ -58,6 +63,13 @@ pub enum FailurePoint {
     AfterHistoryInsert,
     BeforeArrayClose,
     AfterHistoryClose,
+    AfterCounterCreation,
+    BeforeContainsEvaluation,
+    AfterCounterUpdate,
+    AfterRegisterScopeCreation,
+    BeforeRelationEvaluation,
+    AfterCapturePublication,
+    AfterRegisterScopeClose,
     BeforeCheckpointInsert,
     DuringMask,
     DuringRestore,
@@ -71,6 +83,8 @@ pub struct GuideDebugSnapshot {
     pub arena_lengths: (usize, usize, usize, usize),
     pub router: SemanticRouter,
     pub histories: Vec<(super::HistoryKey, Vec<super::CanonicalId>)>,
+    pub counters: Vec<(super::CounterKey, super::ContainsState)>,
+    pub registers: Vec<(super::RegisterKey, super::CanonicalId)>,
     pub lifecycle: Lifecycle,
     pub rollback_available: usize,
     pub retained_rollback_bytes: usize,
@@ -83,14 +97,28 @@ pub(crate) struct GuideScratch {
     pub(crate) equality: EqualityScratch,
     pub(crate) equality_checks: usize,
     pub(crate) equality_limit: Option<usize>,
+    pub(crate) predicate: super::predicate::PredicateScratch,
     #[cfg(debug_assertions)]
     pub(crate) failure: Option<FailurePoint>,
 }
 
 impl Guide {
-    pub fn new(
+    pub fn new(compiled: Arc<CompiledSchema>, options: GuideOptions) -> Result<Self, GuideError> {
+        Self::build(compiled, options, None)
+    }
+
+    pub fn new_with_imports(
+        compiled: Arc<CompiledSchema>,
+        options: GuideOptions,
+        imports: Arc<ImportedMemory>,
+    ) -> Result<Self, GuideError> {
+        Self::build(compiled, options, Some(imports))
+    }
+
+    fn build(
         compiled: Arc<CompiledSchema>,
         mut options: GuideOptions,
+        imports: Option<Arc<ImportedMemory>>,
     ) -> Result<Self, GuideError> {
         options.limits.max_rollback_tokens = options.max_rollback_tokens;
         let words = super::mask::required_words(compiled.token_table().model_width());
@@ -102,16 +130,22 @@ impl Guide {
             }
             .into());
         }
+        for name in compiled.memory_plan().required_imports() {
+            if imports.as_ref().is_none_or(|memory| !memory.has_set(name)) {
+                return Err(GuideError::MissingImport { name: name.into() });
+            }
+        }
         let root = compiled.ir().root();
         let state = GuideState {
             dfa_state: compiled.index().initial_state(),
             cursor: super::JsonCursor::new(compiled.runtime_limits().clone()),
             router: SemanticRouter::new(root),
-            histories: super::HistoryStore::default(),
+            semantic: SemanticState::default(),
             lifecycle: Lifecycle::Active,
         };
         Ok(Self {
             compiled,
+            imports,
             state,
             cursor_journal: CursorJournal::new(options.limits.max_journal_records),
             semantic_journal: SemanticJournal::new(options.limits.max_journal_records),
@@ -269,7 +303,7 @@ impl Guide {
             dfa_state: self.compiled.index().initial_state(),
             cursor: super::JsonCursor::new(self.compiled.runtime_limits().clone()),
             router: SemanticRouter::new(root),
-            histories: super::HistoryStore::default(),
+            semantic: SemanticState::default(),
             lifecycle: Lifecycle::Active,
         };
         self.cursor_journal = CursorJournal::new(self.limits.max_journal_records);
@@ -323,7 +357,9 @@ impl Guide {
             cursor: self.state.cursor.snapshot(),
             arena_lengths: self.state.cursor.arena().lengths(),
             router: self.state.router.clone(),
-            histories: self.state.histories.logical_snapshot(),
+            histories: self.state.semantic.histories.logical_snapshot(),
+            counters: self.state.semantic.counters.logical_snapshot(),
+            registers: self.state.semantic.registers.logical_snapshot(),
             lifecycle: self.state.lifecycle,
             rollback_available: self.rollback.len(),
             retained_rollback_bytes: self.ledger.retained_rollback_bytes,
@@ -408,7 +444,7 @@ impl Guide {
         }
         if let Err(error) = self
             .semantic_journal
-            .restore(mark.semantic, &mut self.state.histories)
+            .restore_state(mark.semantic, &mut self.state.semantic)
         {
             self.state.lifecycle = Lifecycle::Poisoned;
             return Err(error.into());
@@ -527,6 +563,54 @@ pub enum SemanticViolation {
         constraint: super::ConstraintId,
         item_index: u64,
     },
+    ContainsMinimumNotMet {
+        frame: super::FrameId,
+        constraint: super::ConstraintId,
+        processed: u64,
+        matched: u64,
+        lower: u64,
+    },
+    ContainsMaximumExceeded {
+        frame: super::FrameId,
+        constraint: super::ConstraintId,
+        item_index: u64,
+        processed: u64,
+        matched: u64,
+        upper: u64,
+    },
+    ContainsMinimumUnreachable {
+        frame: super::FrameId,
+        constraint: super::ConstraintId,
+        item_index: u64,
+        processed: u64,
+        matched: u64,
+        lower: u64,
+    },
+    MissingCapture {
+        object: super::FrameId,
+        property: Box<str>,
+        capture: Box<str>,
+    },
+    EqualityMismatch {
+        object: super::FrameId,
+        property: Box<str>,
+        capture: Box<str>,
+    },
+    InequalityMismatch {
+        object: super::FrameId,
+        property: Box<str>,
+        capture: Box<str>,
+    },
+    ImportedMemberRequired {
+        object: super::FrameId,
+        property: Box<str>,
+        import_set: Box<str>,
+    },
+    ImportedMemberForbidden {
+        object: super::FrameId,
+        property: Box<str>,
+        import_set: Box<str>,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -567,9 +651,19 @@ pub enum GuideError {
     #[error(transparent)]
     Cursor(#[from] CursorError),
     #[error(transparent)]
+    Arena(#[from] ArenaError),
+    #[error(transparent)]
     Vocabulary(#[from] VocabularyError),
     #[error(transparent)]
     History(#[from] HistoryError),
+    #[error(transparent)]
+    Counter(#[from] CounterError),
+    #[error(transparent)]
+    Register(#[from] RegisterError),
+    #[error(transparent)]
+    Import(#[from] ImportError),
+    #[error("required imported set {name} was not supplied")]
+    MissingImport { name: Box<str> },
     #[error(transparent)]
     Router(#[from] RouterError),
     #[error(transparent)]

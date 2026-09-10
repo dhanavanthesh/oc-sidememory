@@ -35,13 +35,14 @@ pub enum ReplayError {
 
 #[cfg(debug_assertions)]
 pub fn verify_guide_replay(guide: &Guide) -> Result<(), ReplayError> {
-    let mut replay = Guide::new(
-        guide.compiled.clone(),
-        GuideOptions {
-            max_rollback_tokens: 0,
-            limits: guide.limits.clone(),
-        },
-    )?;
+    let options = GuideOptions {
+        max_rollback_tokens: 0,
+        limits: guide.limits.clone(),
+    };
+    let mut replay = match &guide.imports {
+        Some(imports) => Guide::new_with_imports(guide.compiled.clone(), options, imports.clone())?,
+        None => Guide::new(guide.compiled.clone(), options)?,
+    };
     for token in guide.committed_trace.iter().copied() {
         replay.advance(token)?;
     }
@@ -60,13 +61,29 @@ pub fn verify_guide_replay(guide: &Guide) -> Result<(), ReplayError> {
             component: "semantic router",
         });
     }
-    if !replay.state.histories.logical_equal(
+    if !replay.state.semantic.histories.logical_equal(
         replay.state.cursor.arena(),
-        &guide.state.histories,
+        &guide.state.semantic.histories,
         guide.state.cursor.arena(),
     )? {
         return Err(ReplayError::Mismatch {
             component: "uniqueness histories",
+        });
+    }
+    if replay.state.semantic.counters.logical_snapshot()
+        != guide.state.semantic.counters.logical_snapshot()
+    {
+        return Err(ReplayError::Mismatch {
+            component: "contains counters",
+        });
+    }
+    if !replay.state.semantic.registers.logical_equal(
+        replay.state.cursor.arena(),
+        &guide.state.semantic.registers,
+        guide.state.cursor.arena(),
+    )? {
+        return Err(ReplayError::Mismatch {
+            component: "capture registers",
         });
     }
     if replay.state.lifecycle != guide.state.lifecycle {

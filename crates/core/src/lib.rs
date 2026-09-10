@@ -92,5 +92,6 @@ pub mod vocabulary;
 
 pub use error::{Error, Result};
 pub use json_schema::compile::{compile_schema, CompileOptions, CompiledSchema};
-pub use sidememory::{Guide, GuideError, GuideOptions};
+pub use json_schema::extensions::{ExtensionPlanV1, RelationOperator};
+pub use sidememory::{Guide, GuideError, GuideOptions, ImportedMemory};
 pub use vocabulary::Vocabulary;

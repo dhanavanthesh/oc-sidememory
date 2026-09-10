@@ -1,4 +1,5 @@
 use crate::json_schema::compile::CompiledSchema;
+use crate::json_schema::extensions::RelationOperator;
 use crate::primitives::TokenId;
 
 #[cfg(debug_assertions)]
@@ -136,6 +137,7 @@ fn run_transition(
 ) -> Result<ProbeDecision, GuideError> {
     let Guide {
         compiled,
+        imports,
         state,
         cursor_journal,
         semantic_journal,
@@ -149,6 +151,7 @@ fn run_transition(
         equality,
         equality_checks,
         equality_limit,
+        predicate,
         #[cfg(debug_assertions)]
         failure,
         ..
@@ -158,6 +161,7 @@ fn run_transition(
         state.cursor.finish_eos_into(events, cursor_journal)?;
         let mut context = EventContext {
             compiled: compiled.as_ref(),
+            imports: imports.as_deref(),
             state,
             router_journal,
             semantic_journal,
@@ -165,6 +169,7 @@ fn run_transition(
             equality,
             equality_checks,
             equality_limit: *equality_limit,
+            predicate,
             #[cfg(debug_assertions)]
             failure,
         };
@@ -182,6 +187,7 @@ fn run_transition(
         inject_failure(failure, FailurePoint::AfterCursorMutation)?;
         let mut context = EventContext {
             compiled: compiled.as_ref(),
+            imports: imports.as_deref(),
             state,
             router_journal,
             semantic_journal,
@@ -189,6 +195,7 @@ fn run_transition(
             equality,
             equality_checks,
             equality_limit: *equality_limit,
+            predicate,
             #[cfg(debug_assertions)]
             failure,
         };
@@ -202,6 +209,7 @@ fn run_transition(
 
 struct EventContext<'a> {
     compiled: &'a CompiledSchema,
+    imports: Option<&'a super::ImportedMemory>,
     state: &'a mut GuideState,
     router_journal: &'a mut RouterJournal,
     semantic_journal: &'a mut SemanticJournal,
@@ -209,6 +217,7 @@ struct EventContext<'a> {
     equality: &'a mut super::canonical::EqualityScratch,
     equality_checks: &'a mut usize,
     equality_limit: Option<usize>,
+    predicate: &'a mut super::predicate::PredicateScratch,
     #[cfg(debug_assertions)]
     failure: &'a mut Option<FailurePoint>,
 }
@@ -233,6 +242,7 @@ fn process_event(
 ) -> Result<Option<SemanticViolation>, GuideError> {
     let EventContext {
         compiled,
+        imports,
         state,
         router_journal,
         semantic_journal,
@@ -240,6 +250,7 @@ fn process_event(
         equality,
         equality_checks,
         equality_limit,
+        predicate,
         #[cfg(debug_assertions)]
         failure,
     } = context;
@@ -252,7 +263,7 @@ fn process_event(
             inject_failure(failure, FailurePoint::AfterFrameAllocation)?;
             if let Some(constraint) = compiled.memory_plan().unique_for_node(node) {
                 super::constraints::unique::open(
-                    &mut state.histories,
+                    &mut state.semantic.histories,
                     HistoryKey {
                         frame,
                         constraint: constraint.constraint_id,
@@ -263,11 +274,35 @@ fn process_event(
                 #[cfg(debug_assertions)]
                 inject_failure(failure, FailurePoint::AfterHistoryCreation)?;
             }
+            if let Some(constraint) = compiled.memory_plan().contains_for_node(node) {
+                super::constraints::contains::open(
+                    &mut state.semantic.counters,
+                    frame,
+                    constraint,
+                    limits,
+                    semantic_journal,
+                )?;
+                #[cfg(debug_assertions)]
+                inject_failure(failure, FailurePoint::AfterCounterCreation)?;
+            }
         }
         JsonEvent::ObjectStart(frame) => {
-            state
+            let node = state
                 .router
                 .open_object_journaled(frame, compiled.ir(), router_journal)?;
+            if compiled
+                .memory_plan()
+                .object_extension_for_node(node)
+                .is_some()
+            {
+                state.semantic.registers.open_journaled(
+                    frame,
+                    limits.max_register_scopes,
+                    semantic_journal,
+                )?;
+                #[cfg(debug_assertions)]
+                inject_failure(failure, FailurePoint::AfterRegisterScopeCreation)?;
+            }
             #[cfg(debug_assertions)]
             inject_failure(failure, FailurePoint::AfterFrameAllocation)?;
         }
@@ -291,7 +326,7 @@ fn process_event(
                 inject_failure(failure, FailurePoint::BeforeHistoryInsert)?;
                 let violation = super::constraints::unique::seal_item(
                     super::constraints::unique::ItemContext {
-                        histories: &mut state.histories,
+                        histories: &mut state.semantic.histories,
                         arena: state.cursor.arena(),
                         journal: semantic_journal,
                         equality,
@@ -310,11 +345,86 @@ fn process_event(
                     return Ok(violation);
                 }
             }
+            if let Some(constraint) = compiled.memory_plan().contains_for_node(node) {
+                #[cfg(debug_assertions)]
+                inject_failure(failure, FailurePoint::BeforeContainsEvaluation)?;
+                let violation = super::constraints::contains::seal_item(
+                    &mut state.semantic.counters,
+                    compiled.ir(),
+                    state.cursor.arena(),
+                    predicate,
+                    array,
+                    index,
+                    value,
+                    constraint,
+                    limits,
+                    semantic_journal,
+                )?;
+                #[cfg(debug_assertions)]
+                inject_failure(failure, FailurePoint::AfterCounterUpdate)?;
+                if violation.is_some() {
+                    return Ok(violation);
+                }
+            }
             state
                 .router
                 .complete_array_item_journaled(array, router_journal)?;
         }
-        JsonEvent::PropertyValueSealed { object, .. } => {
+        JsonEvent::PropertyValueSealed { object, key, value } => {
+            let node = state.router.object_schema_node(object)?;
+            if let Some(plan) = compiled.memory_plan().object_extension_for_node(node) {
+                let key_text =
+                    std::str::from_utf8(&key).map_err(|_| GuideError::InternalInvariant {
+                        context: "sealed property key is not UTF-8".into(),
+                    })?;
+                if let Some(actions) = plan.actions.get(key_text) {
+                    for relation in &actions.relations {
+                        #[cfg(debug_assertions)]
+                        inject_failure(failure, FailurePoint::BeforeRelationEvaluation)?;
+                        let violation = match relation.operator {
+                            RelationOperator::Equal | RelationOperator::NotEqual => {
+                                super::constraints::equality::evaluate(
+                                    relation,
+                                    &state.semantic.registers,
+                                    state.cursor.arena(),
+                                    object,
+                                    value,
+                                    equality,
+                                )?
+                            }
+                            RelationOperator::MemberOf | RelationOperator::NotMemberOf => {
+                                let imports = imports.ok_or(GuideError::InternalInvariant {
+                                    context: "validated imported memory is absent".into(),
+                                })?;
+                                super::constraints::membership::evaluate(
+                                    relation,
+                                    imports,
+                                    state.cursor.arena(),
+                                    object,
+                                    value,
+                                    equality,
+                                )?
+                            }
+                        };
+                        if violation.is_some() {
+                            return Ok(violation);
+                        }
+                    }
+                    for capture in &actions.captures {
+                        state.semantic.registers.set_journaled(
+                            super::RegisterKey {
+                                object,
+                                register: capture.register,
+                            },
+                            value,
+                            limits.max_register_values,
+                            semantic_journal,
+                        )?;
+                        #[cfg(debug_assertions)]
+                        inject_failure(failure, FailurePoint::AfterCapturePublication)?;
+                    }
+                }
+            }
             state
                 .router
                 .complete_property_journaled(object, router_journal)?;
@@ -323,9 +433,20 @@ fn process_event(
             #[cfg(debug_assertions)]
             inject_failure(failure, FailurePoint::BeforeArrayClose)?;
             let node = state.router.array_schema_node(frame)?;
+            if let Some(constraint) = compiled.memory_plan().contains_for_node(node) {
+                let violation = super::constraints::contains::close(
+                    &mut state.semantic.counters,
+                    frame,
+                    constraint,
+                    semantic_journal,
+                )?;
+                if violation.is_some() {
+                    return Ok(violation);
+                }
+            }
             if let Some(constraint) = compiled.memory_plan().unique_for_node(node) {
                 super::constraints::unique::close(
-                    &mut state.histories,
+                    &mut state.semantic.histories,
                     HistoryKey {
                         frame,
                         constraint: constraint.constraint_id,
@@ -338,6 +459,19 @@ fn process_event(
             state.router.close_journaled(frame, router_journal)?;
         }
         JsonEvent::ObjectEnd { frame, .. } => {
+            let node = state.router.object_schema_node(frame)?;
+            if compiled
+                .memory_plan()
+                .object_extension_for_node(node)
+                .is_some()
+            {
+                state
+                    .semantic
+                    .registers
+                    .close_journaled(frame, semantic_journal)?;
+                #[cfg(debug_assertions)]
+                inject_failure(failure, FailurePoint::AfterRegisterScopeClose)?;
+            }
             state.router.close_journaled(frame, router_journal)?;
         }
         JsonEvent::RootComplete(_) => {

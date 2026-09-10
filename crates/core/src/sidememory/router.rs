@@ -321,6 +321,19 @@ impl SemanticRouter {
         }
     }
 
+    pub fn object_schema_node(&self, frame: FrameId) -> Result<SchemaNodeId, RouterError> {
+        match self
+            .stack
+            .iter()
+            .rev()
+            .find(|runtime| runtime.id() == frame)
+        {
+            Some(RuntimeFrame::Object { schema_node, .. }) => Ok(*schema_node),
+            Some(_) => Err(RouterError::ExpectedObjectFrame(frame)),
+            None => Err(RouterError::UnknownFrame(frame)),
+        }
+    }
+
     pub fn complete_root(&mut self) -> Result<(), RouterError> {
         let mut journal = RouterJournal::new(usize::MAX);
         self.complete_root_journaled(&mut journal)
