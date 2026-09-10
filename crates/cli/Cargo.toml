@@ -5,14 +5,23 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Command-line interface for OC-Sidememory"
 publish = false
 
 [dependencies]
 oc-sidememory = { path = "../core", default-features = false }
+serde.workspace = true
+serde-json.workspace = true
+
+[[bin]]
+name = "oc-sidememory"
+path = "src/main.rs"
+doc = false
 
 [[bin]]
 name = "convert-json-schema"
 path = "src/bin/convert-json-schema.rs"
+doc = false
 test = false
 bench = false
 
