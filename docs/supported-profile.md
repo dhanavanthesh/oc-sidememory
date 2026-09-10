@@ -1,40 +1,23 @@
-# Supported JSON Schema profile
+# Supported schema profile
 
-OC-Sidememory compiles a checked subset of JSON Schema Draft 2020-12.
-Unsupported assertions fail with structured diagnostics.
+OC-Sidememory accepts a checked subset of JSON Schema Draft 2020-12. Unsupported assertions produce compile diagnostics.
 
-## Serialization policy
-
-- Numeric `const` and `enum` literals use plain decimal when that spelling
-  is at most 4096 digits. Larger expansions use exact scientific notation.
-- Scientific notation emitted through `serde_json` may include a `+` before
-  a positive exponent.
-- String literals match their exact JSON encoding. Equivalent `\uXXXX`
-  spellings are not generated as alternatives.
-- Structural whitespace uses the legacy policy of one optional space.
-
-## Supported assertions
-
-| Feature | Status |
+| Feature | Support |
 |---|---|
-| Boolean schema | Supported |
-| Explicit scalar type | Supported |
-| Homogeneous typed array and `items` | Supported within the profile |
-| `minItems` and `maxItems` | Supported |
-| `uniqueItems: false` | Supported as a no-op |
-| `uniqueItems: true` | Compiled into a `MemoryPlan`; runtime enforcement is not available |
-| Explicit object `properties` and `required` | Supported |
-| `additionalProperties: false` | Supported |
-| Exact scalar `const` and `enum` | Supported |
-| Composite `const` and `enum` | Unsupported |
+| Boolean schemas and scalar `type` | Yes |
+| Exact scalar `const` and `enum` | Yes |
+| Composite `const` and `enum` | No |
+| Homogeneous array `items`, `minItems`, `maxItems` | Yes |
+| `uniqueItems` | Exact generation-time enforcement |
+| `contains`, `minContains`, `maxContains` | Yes, with the predicate subset below |
+| Closed `properties` and `required` objects | Yes |
 
-Known annotations may be accepted according to `CheckedProfile` without
-assertion behavior.
+`minContains` defaults to 1. A value of 0 is valid. Bounds without adjacent `contains` have no effect.
 
-## Unsupported assertions
+Contains predicates support booleans, checked scalar types, exact scalar constants and enums, closed objects, `required`, homogeneous arrays, item bounds, and nested `uniqueItems`. Nested `contains`, references, combinators, conditionals, unevaluated assertions, and unsupported composite constants are rejected.
 
-`allOf`, `anyOf`, `oneOf`, `not`, `$ref`, `prefixItems`, `contains`,
-conditionals, dependent assertions, unevaluated assertions, pattern
-properties, and format assertions are rejected explicitly. Unknown extension
-keywords follow the configured profile policy and are never silently treated
-as assertions.
+The general compiler does not support `$ref`, `allOf`, `anyOf`, `oneOf`, `not`, `prefixItems`, conditionals, dependent assertions, unevaluated assertions, pattern properties, or format assertions.
+
+The version 1 extension supports fixed-order direct-property captures, equality, inequality, membership, and non-membership. Forward references, cycles, unknown names, incompatible types, and ambiguous scopes fail compilation.
+
+Numbers are compared exactly without floating-point conversion. String equality uses decoded code points without Unicode normalization. Object equality ignores property order; array equality preserves it.

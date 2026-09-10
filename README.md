@@ -1,53 +1,117 @@
 # OC-Sidememory
 
-Semantic side-memory for constrained LLM decoding.
+OC-Sidememory is a Rust and Python constrained-decoding engine that refines structural token masks with exact, rollback-safe JSON semantic constraints.
 
-OC-Sidememory keeps the finite-state structural guide from
-[outlines-core](https://github.com/dottxt-ai/outlines-core) and adds a
-checked compiler, exact tokenizer byte identities, an incremental JSON
-cursor, canonical JSON values, and transactional semantic enforcement.
+## Features
 
-## Principle
+- Checked compilation of a documented JSON Schema Draft 2020-12 subset.
+- Generation-time `uniqueItems`, `contains`, `minContains`, and `maxContains`.
+- Versioned opt-in capture equality and immutable imported membership.
+- Exact JSON equality for numbers, strings, arrays, and objects.
+- Atomic probe and advance, EOS, reset, and bounded token rollback.
+- A Rust semantic authority, thin Python adapter, and JSON CLI.
 
-Do not replace the DFA. Semantic memory is a sparse refinement of the
-mask:
+Unsupported combinations fail compilation. See the [supported profile](docs/supported-profile.md) and [limitations](docs/limitations.md).
 
-$$M_{\mathrm{OC}} = M_{\mathrm{DFA}} \wedge \lnot M_{\mathrm{deny}}, \qquad L_{\mathrm{OC}} \subseteq L_{\mathrm{DFA}}$$
+## Installation
 
-$$\mathrm{admit}(v) \iff v \mathbin{\theta} \mathcal{M}, \qquad \theta \in \{\,\in,\ \notin,\ =,\ \neq\,\}$$
+The project is not published to crates.io or PyPI. Build from a checkout:
 
-A completed value $v$ is admitted by its relation $\theta$ to runtime
-memory $\mathcal{M}$: `uniqueItems` is $v \notin \mathcal{H}$ over a
-history set, cross-field equality is $v = R$ over a register, membership
-is $v \in S$ over an imported set. Schemas with no side-memory
-constraints use the existing fast path unchanged.
+```console
+uv sync
+uv run maturin develop --release
+```
 
-## Status
+For Rust, use a path dependency until publication is authorized:
 
-`SidememoryGuide` enforces `uniqueItems`, `contains`, `minContains`, and
-`maxContains` while tokens are generated. Probes, semantic masks, direct
-advance, EOS, reset, and bounded rollback use the same Rust transition
-engine. Exact JSON equality treats numeric aliases and object key order
-according to JSON Schema equality rather than source spelling.
+```toml
+[dependencies]
+oc-sidememory = { path = "crates/core", default-features = false }
+```
 
-An optional version 1 extension plan supports direct properties in one
-object instance. It can capture an earlier property and require a later
-property to be equal, unequal, a member of an immutable imported set, or
-not a member of that set. Extension-bearing objects use their declared
-generation order. Imported memory has an application-defined identity and
-version and is immutable for the lifetime of a guide.
+## Python quick start
 
-The predicate accepted by `contains` supports boolean schemas, checked
-scalar types, exact scalar `const` and `enum`, closed objects, `required`,
-homogeneous arrays, array item bounds, and nested `uniqueItems`.
+```python
+import json
+import oc_sidememory
+from transformers import AutoTokenizer
 
-The checked compiler rejects unsupported predicate composition, including
-nested `contains`, `$ref`, `allOf`, `anyOf`, `oneOf`, `not`, conditionals,
-and `unevaluatedItems`. Capture relations are limited to direct properties
-in the same object instance. Live `SidememoryGuide` serialization is not
-supported. The compatibility `Guide` remains the legacy DFA-only API.
+tokenizer = AutoTokenizer.from_pretrained("gpt2", local_files_only=True)
+vocabulary = oc_sidememory.Vocabulary.from_transformers(tokenizer)
+schema = {
+    "type": "array",
+    "items": {"type": "string", "enum": ["red", "green", "blue"]},
+    "minItems": 3,
+    "maxItems": 3,
+    "uniqueItems": True,
+}
+compiled = oc_sidememory.compile_schema(
+    json.dumps(schema), vocabulary, tokenizer.vocab_size
+)
+guide = oc_sidememory.SidememoryGuide(compiled, max_rollback=32)
+tokens = tokenizer.encode('["red","red","blue"]', add_special_tokens=False)
+assert not guide.accepts_tokens(tokens, finish=True)
+```
 
-## License
+The public Python examples pin GPT-2 revision `607a30d783dfa663caf39e06633721c8d4cfcd7e`, force offline loading, and never download silently. The revision is a public model version, not a credential.
 
-Apache-2.0. See [`LICENSE`](LICENSE), [`NOTICE`](NOTICE) and
-[`PROVENANCE.md`](PROVENANCE.md).
+## Rust example
+
+Buildable programs using the public API are in [examples](examples/README.md). They use deterministic byte vocabularies and require no network or model.
+
+## Architecture and guarantees
+
+The DFA remains authoritative for structure. Semantics may only remove candidates:
+
+```math
+\operatorname{Allowed}(\sigma,x)=
+\operatorname{DFAAllowed}(q,x)\land
+\operatorname{SemanticAllowed}(\sigma,x)
+```
+
+```math
+M_{\mathrm{OC}}=M_{\mathrm{DFA}}\land\neg M_{\mathrm{deny}}
+```
+
+Probe, mask, direct advance, sequence checking, and EOS use one byte-by-byte Rust transition. An outer transaction covers the cursor, router, canonical arena, histories, counters, registers, lifecycle, and trace.
+
+```math
+\operatorname{admit}(v)\iff\operatorname{canon}(v)\notin H_a
+```
+
+```math
+c_a=\sum_{i=1}^{n}\mathbf{1}[\operatorname{Validate}(v_i,P)],\qquad l\le c_a\le u
+```
+
+```math
+\operatorname{StateAfterProbe}(\sigma,x)=\sigma
+```
+
+Monotonic revision counters and retained allocation capacity are excluded from logical state equality. See [architecture](docs/architecture.md), [Rust API](docs/rust-api.md), and [Python API](docs/python-api.md).
+
+## Extensions and imports
+
+Cross-field relations are an explicit version 1 generation extension, not standard JSON Schema. An extension-bearing object declares property order and may capture an earlier direct property for equality or inequality. Membership relations query immutable, identity-versioned imported sets. See [extensions](docs/extensions-v1.md) and [imported memory](docs/imported-memory.md).
+
+## CLI
+
+The `oc-sidememory` binary provides `compile`, `tokens`, `mask`, `check`, `inspect-imports`, and `capabilities`. Inputs and outputs are versioned JSON; token bytes use base64. See the [CLI reference](docs/cli.md).
+
+## Performance
+
+The semantic engine uses journaled mutation instead of cloning complete guide state. Initial local measurements and denominators are in [performance](docs/performance.md). A candidate-buffer experiment was removed after it regressed representative p95 mask latency. No universal speedup or zero-overhead claim is made.
+
+## Development
+
+```console
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+uv run pytest -q
+```
+
+Deterministic correctness tests require no model or network. Cached-model examples are demonstrations, not correctness oracles.
+
+## Provenance and license
+
+OC-Sidememory is independently developed from an Apache-2.0 outlines-core source import and is not endorsed by that project. See [provenance](PROVENANCE.md), [modifications](MODIFICATIONS.md), [NOTICE](NOTICE), and [LICENSE](LICENSE).
