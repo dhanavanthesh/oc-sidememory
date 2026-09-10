@@ -34,3 +34,17 @@ These are local engineering results, not general product claims. Candidate count
 A reusable candidate-buffer experiment preserved semantic digests but regressed representative p95 latency. Uniqueness with 100 candidates moved from 0.2910 ms to 0.3939 ms. The change was removed.
 
 The retained design uses journaled mutation, compiled dispatch, exact collision checks, and reusable event scratch. It does not claim zero overhead.
+
+## Allocation and memory profile
+
+The release-mode native allocation benchmark produced these local results for a 1,000-candidate combined mask:
+
+| Measurement | Value |
+|---|---:|
+| Allocations | 12,921 |
+| Allocated bytes | 390,500 |
+| Peak live allocation increase | 14,118 bytes |
+| Retained allocation increase | 5,900 bytes |
+| Logical bytes for one retained rollback checkpoint | 2,726 bytes |
+
+A separate 100-candidate combined run recorded a process peak RSS of 26.07 MB. Python allocation tracing peaked at 19,759 bytes, excluding native Rust allocations. These values describe the recorded Windows environment only.
