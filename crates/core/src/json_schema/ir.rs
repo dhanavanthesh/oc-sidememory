@@ -1,4 +1,5 @@
 use super::diagnostic::SchemaLocation;
+use super::extensions::CompiledExtensions;
 use super::profile::Dialect;
 use crate::sidememory::number::CanonicalNumber;
 
@@ -16,6 +17,7 @@ pub struct SchemaIr {
     pub(crate) root: SchemaNodeId,
     pub(crate) nodes: Vec<SchemaNode>,
     pub(crate) dialect: Dialect,
+    pub(crate) extensions: CompiledExtensions,
 }
 
 impl SchemaIr {
@@ -34,6 +36,10 @@ impl SchemaIr {
     pub fn dialect(&self) -> Dialect {
         self.dialect
     }
+
+    pub(crate) fn extensions(&self) -> &CompiledExtensions {
+        &self.extensions
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -45,6 +51,7 @@ pub struct SchemaNode {
     pub array: Option<ArrayAssertions>,
     pub object: Option<ObjectAssertions>,
     pub semantic: Vec<SemanticAssertion>,
+    pub always_false: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -85,9 +92,19 @@ pub struct ObjectAssertions {
     pub properties: Vec<(Box<str>, SchemaNodeId)>,
     pub required: Vec<Box<str>>,
     pub additional_properties: bool,
+    pub fixed_property_order: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SemanticAssertion {
     UniqueItems,
+    Contains(ContainsAssertion),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ContainsAssertion {
+    pub predicate: SchemaNodeId,
+    pub lower: u64,
+    pub upper: Option<u64>,
+    pub array_max_items: Option<u64>,
 }

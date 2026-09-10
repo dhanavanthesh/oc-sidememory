@@ -10,9 +10,10 @@ use crate::sidememory::token_table::TokenTable;
 use crate::vocabulary::Vocabulary;
 
 use super::diagnostic::{CompileError, SchemaLocation};
+use super::extensions::{self, ExtensionPlanV1};
 use super::ir::{
-    ArrayAssertions, InstanceType, ObjectAssertions, ScalarAssertions, ScalarLiteral, SchemaIr,
-    SchemaNode, SchemaNodeId, SemanticAssertion,
+    ArrayAssertions, ContainsAssertion, InstanceType, ObjectAssertions, ScalarAssertions,
+    ScalarLiteral, SchemaIr, SchemaNode, SchemaNodeId, SemanticAssertion,
 };
 use super::profile::{CheckedProfile, Dialect, UnknownKeywordPolicy};
 use super::{legacy, memory_keywords, structural};
@@ -28,6 +29,7 @@ pub struct CompileOptions {
     pub compile_limits: CompileLimits,
     pub runtime_limits: RuntimeLimits,
     pub serialization_policy: SerializationPolicy,
+    pub extension_plan: Option<ExtensionPlanV1>,
 }
 
 impl Default for CompileOptions {
@@ -37,6 +39,7 @@ impl Default for CompileOptions {
             compile_limits: CompileLimits::default(),
             runtime_limits: RuntimeLimits::default(),
             serialization_policy: SerializationPolicy::LegacyCompatible,
+            extension_plan: None,
         }
     }
 }
@@ -145,12 +148,14 @@ pub fn compile_ir(schema_bytes: &[u8], options: &CompileOptions) -> Result<Schem
         })?;
     check_dialect(&raw_schema, options.profile.dialect)?;
     let mut builder = IrBuilder::new(options);
-    let root = builder.build_node(&raw_schema, SchemaLocation::root(), 0)?;
-    let ir = SchemaIr {
+    let root = builder.build_node(&raw_schema, SchemaLocation::root(), 0, false)?;
+    let mut ir = SchemaIr {
         root,
         nodes: builder.nodes,
         dialect: options.profile.dialect,
+        extensions: extensions::CompiledExtensions::default(),
     };
+    extensions::apply(&mut ir, options.extension_plan.as_ref())?;
     Ok(ir)
 }
 
@@ -172,6 +177,7 @@ impl<'a> IrBuilder<'a> {
         raw: &Value,
         location: SchemaLocation,
         depth: usize,
+        predicate_context: bool,
     ) -> Result<SchemaNodeId, CompileError> {
         let depth_limit = self
             .options
@@ -187,6 +193,18 @@ impl<'a> IrBuilder<'a> {
             .into());
         }
         if raw == &Value::Bool(false) {
+            if predicate_context {
+                return self.push_node(SchemaNode {
+                    id: SchemaNodeId(0),
+                    schema_location: location,
+                    instance_type: InstanceType::Any,
+                    scalar: ScalarAssertions::default(),
+                    array: None,
+                    object: None,
+                    semantic: Vec::new(),
+                    always_false: true,
+                });
+            }
             return Err(CompileError::UnsatisfiableSchema {
                 location,
                 reason: "boolean false rejects every instance".into(),
@@ -201,6 +219,7 @@ impl<'a> IrBuilder<'a> {
                 array: None,
                 object: None,
                 semantic: Vec::new(),
+                always_false: false,
             });
         }
         let object = raw
@@ -209,6 +228,13 @@ impl<'a> IrBuilder<'a> {
                 location: location.clone(),
                 cause: "schema must be a boolean or object".into(),
             })?;
+        if predicate_context && object.contains_key("contains") {
+            return Err(unsupported(
+                &location,
+                "contains",
+                "nested contains predicates are outside the checked profile",
+            ));
+        }
         self.check_keywords(object, &location)?;
         validate_keyword_values(object, &location)?;
         let instance_type = parse_type(object.get("type"), &location)?;
@@ -217,7 +243,8 @@ impl<'a> IrBuilder<'a> {
         let mut semantic = Vec::new();
         let array = if instance_type == InstanceType::Array {
             let items = object.get("items").unwrap_or(&Value::Bool(true));
-            let items = self.build_node(items, location.child("items"), depth + 1)?;
+            let items =
+                self.build_node(items, location.child("items"), depth + 1, predicate_context)?;
             let min_items = keyword_u64(object, "minItems", 0, &location)?;
             let max_items = optional_u64(object, "maxItems", &location)?;
             if max_items.is_some_and(|maximum| min_items > maximum) {
@@ -248,6 +275,24 @@ impl<'a> IrBuilder<'a> {
             if keyword_bool(object, "uniqueItems", false, &location)? {
                 semantic.push(SemanticAssertion::UniqueItems);
             }
+            if let Some(predicate) = object.get("contains") {
+                let lower = keyword_u64(object, "minContains", 1, &location)?;
+                let upper = optional_u64(object, "maxContains", &location)?;
+                if upper.is_some_and(|maximum| lower > maximum) {
+                    return Err(CompileError::UnsatisfiableSchema {
+                        location: location.clone(),
+                        reason: "minContains exceeds maxContains".into(),
+                    });
+                }
+                let predicate =
+                    self.build_node(predicate, location.child("contains"), depth + 1, true)?;
+                semantic.push(SemanticAssertion::Contains(ContainsAssertion {
+                    predicate,
+                    lower,
+                    upper,
+                    array_max_items: max_items,
+                }));
+            }
             Some(ArrayAssertions {
                 items,
                 min_items,
@@ -264,7 +309,7 @@ impl<'a> IrBuilder<'a> {
             None
         };
         let object_assertions = if instance_type == InstanceType::Object {
-            Some(self.object_assertions(object, &location, depth)?)
+            Some(self.object_assertions(object, &location, depth, predicate_context)?)
         } else {
             None
         };
@@ -276,6 +321,7 @@ impl<'a> IrBuilder<'a> {
             array,
             object: object_assertions,
             semantic,
+            always_false: false,
         })
     }
 
@@ -384,6 +430,7 @@ impl<'a> IrBuilder<'a> {
         object: &serde_json::Map<String, Value>,
         location: &SchemaLocation,
         depth: usize,
+        predicate_context: bool,
     ) -> Result<ObjectAssertions, CompileError> {
         let raw_properties = object
             .get("properties")
@@ -398,8 +445,12 @@ impl<'a> IrBuilder<'a> {
             .ok_or_else(|| invalid(location, "properties", "an object"))?;
         let mut properties = Vec::with_capacity(raw_properties.len());
         for (name, schema) in raw_properties {
-            let child =
-                self.build_node(schema, location.child("properties").child(name), depth + 1)?;
+            let child = self.build_node(
+                schema,
+                location.child("properties").child(name),
+                depth + 1,
+                predicate_context,
+            )?;
             properties.push((name.clone().into_boxed_str(), child));
         }
         let required = match object.get("required") {
@@ -431,6 +482,7 @@ impl<'a> IrBuilder<'a> {
             properties,
             required,
             additional_properties: false,
+            fixed_property_order: false,
         })
     }
 }
@@ -595,8 +647,15 @@ fn validate_keyword_values(
             return Err(invalid(location, "items", "a boolean or schema object"));
         }
     }
+    if let Some(contains) = object.get("contains") {
+        if !contains.is_boolean() && !contains.is_object() {
+            return Err(invalid(location, "contains", "a boolean or schema object"));
+        }
+    }
     optional_u64(object, "minItems", location)?;
     optional_u64(object, "maxItems", location)?;
+    optional_u64(object, "minContains", location)?;
+    optional_u64(object, "maxContains", location)?;
     keyword_bool(object, "uniqueItems", false, location)?;
     if object
         .get("properties")
@@ -632,7 +691,14 @@ fn validate_applicability(
     instance_type: InstanceType,
     location: &SchemaLocation,
 ) -> Result<(), CompileError> {
-    for keyword in ["items", "minItems", "maxItems"] {
+    for keyword in [
+        "items",
+        "minItems",
+        "maxItems",
+        "contains",
+        "minContains",
+        "maxContains",
+    ] {
         if object.contains_key(keyword) && instance_type != InstanceType::Array {
             return Err(unsupported(
                 location,
@@ -686,6 +752,9 @@ const SUPPORTED: &[&str] = &[
     "minItems",
     "maxItems",
     "uniqueItems",
+    "contains",
+    "minContains",
+    "maxContains",
     "properties",
     "required",
     "additionalProperties",
@@ -714,9 +783,6 @@ const UNSUPPORTED_STANDARD: &[&str] = &[
     "then",
     "else",
     "prefixItems",
-    "contains",
-    "minContains",
-    "maxContains",
     "unevaluatedItems",
     "unevaluatedProperties",
     "dependentSchemas",

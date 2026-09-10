@@ -72,7 +72,9 @@ fn build(ir: &SchemaIr, id: SchemaNodeId) -> Result<Value, CompileError> {
             "additionalProperties".into(),
             Value::Bool(shape.additional_properties),
         );
-        object.insert("__oc_unordered_required".into(), Value::Bool(true));
+        if !shape.fixed_property_order {
+            object.insert("__oc_unordered_required".into(), Value::Bool(true));
+        }
     }
     Ok(Value::Object(object))
 }

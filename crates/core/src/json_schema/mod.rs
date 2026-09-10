@@ -104,6 +104,7 @@ pub use types::*;
 
 pub mod compile;
 pub mod diagnostic;
+pub mod extensions;
 pub mod ir;
 mod legacy;
 mod memory_keywords;
