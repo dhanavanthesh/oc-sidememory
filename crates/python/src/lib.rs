@@ -17,7 +17,8 @@ use oc_sidememory::index::Index;
 use oc_sidememory::json_schema;
 use oc_sidememory::prelude::*;
 use oc_sidememory::sidememory::{
-    GuideError as CoreGuideError, ProbeDecision, SemanticViolation as CoreSemanticViolation,
+    ArenaError, CounterError, GuideError as CoreGuideError, HistoryError, ImportError,
+    JournalError, ProbeDecision, RegisterError, SemanticViolation as CoreSemanticViolation,
     SequenceDecision,
 };
 
@@ -45,8 +46,18 @@ fn guide_error(error: CoreGuideError) -> PyErr {
         }
         CoreGuideError::SemanticRejection(violation) => semantic_error(violation),
         CoreGuideError::Resource(_)
-        | CoreGuideError::History(oc_sidememory::sidememory::HistoryError::Resource(_))
-        | CoreGuideError::Journal(oc_sidememory::sidememory::JournalError::Resource(_)) => {
+        | CoreGuideError::Arena(ArenaError::Resource(_))
+        | CoreGuideError::History(HistoryError::Resource(_))
+        | CoreGuideError::History(HistoryError::Arena(ArenaError::Resource(_)))
+        | CoreGuideError::History(HistoryError::Journal(JournalError::Resource(_)))
+        | CoreGuideError::Counter(CounterError::Resource(_))
+        | CoreGuideError::Counter(CounterError::Journal(JournalError::Resource(_)))
+        | CoreGuideError::Register(RegisterError::Resource(_))
+        | CoreGuideError::Register(RegisterError::Journal(JournalError::Resource(_)))
+        | CoreGuideError::Import(ImportError::Resource(_))
+        | CoreGuideError::Import(ImportError::Arena(ArenaError::Resource(_)))
+        | CoreGuideError::Import(ImportError::History(HistoryError::Resource(_)))
+        | CoreGuideError::Journal(JournalError::Resource(_)) => {
             ResourceLimitError::new_err(message)
         }
         CoreGuideError::InvalidLifecycle { .. } => LifecycleError::new_err(message),
@@ -61,19 +72,130 @@ fn guide_error(error: CoreGuideError) -> PyErr {
 }
 
 fn semantic_error(violation: CoreSemanticViolation) -> PyErr {
-    let CoreSemanticViolation::DuplicateArrayItem {
-        frame,
-        constraint,
-        item_index,
-    } = violation;
-    let error = SemanticViolation::new_err("duplicate array item");
+    let (message, category, frame) = match &violation {
+        CoreSemanticViolation::DuplicateArrayItem { frame, .. } => {
+            ("duplicate array item", "duplicate_array_item", *frame)
+        }
+        CoreSemanticViolation::ContainsMinimumNotMet { frame, .. } => (
+            "contains minimum not met",
+            "contains_minimum_not_met",
+            *frame,
+        ),
+        CoreSemanticViolation::ContainsMaximumExceeded { frame, .. } => (
+            "contains maximum exceeded",
+            "contains_maximum_exceeded",
+            *frame,
+        ),
+        CoreSemanticViolation::ContainsMinimumUnreachable { frame, .. } => (
+            "contains minimum is unreachable",
+            "contains_minimum_unreachable",
+            *frame,
+        ),
+        CoreSemanticViolation::MissingCapture { object, .. } => {
+            ("capture is not available", "missing_capture", *object)
+        }
+        CoreSemanticViolation::EqualityMismatch { object, .. } => (
+            "captured value does not match",
+            "equality_mismatch",
+            *object,
+        ),
+        CoreSemanticViolation::InequalityMismatch { object, .. } => (
+            "captured value must be different",
+            "inequality_mismatch",
+            *object,
+        ),
+        CoreSemanticViolation::ImportedMemberRequired { object, .. } => (
+            "value is not in the imported set",
+            "imported_member_required",
+            *object,
+        ),
+        CoreSemanticViolation::ImportedMemberForbidden { object, .. } => (
+            "value is in the forbidden imported set",
+            "imported_member_forbidden",
+            *object,
+        ),
+    };
+    let error = SemanticViolation::new_err(message);
     Python::attach(|py| {
         let value = error.value(py);
-        let _ = value.setattr("category", "duplicate_array_item");
+        let _ = value.setattr("category", category);
         let _ = value.setattr("frame_slot", frame.slot);
         let _ = value.setattr("frame_generation", frame.generation);
-        let _ = value.setattr("constraint", constraint.get());
-        let _ = value.setattr("item_index", item_index);
+        match &violation {
+            CoreSemanticViolation::DuplicateArrayItem {
+                constraint,
+                item_index,
+                ..
+            } => {
+                let _ = value.setattr("constraint", constraint.get());
+                let _ = value.setattr("item_index", item_index);
+            }
+            CoreSemanticViolation::ContainsMinimumNotMet {
+                constraint,
+                processed,
+                matched,
+                lower,
+                ..
+            } => {
+                let _ = value.setattr("constraint", constraint.get());
+                let _ = value.setattr("processed", processed);
+                let _ = value.setattr("matched", matched);
+                let _ = value.setattr("lower", lower);
+            }
+            CoreSemanticViolation::ContainsMaximumExceeded {
+                constraint,
+                item_index,
+                processed,
+                matched,
+                upper,
+                ..
+            } => {
+                let _ = value.setattr("constraint", constraint.get());
+                let _ = value.setattr("item_index", item_index);
+                let _ = value.setattr("processed", processed);
+                let _ = value.setattr("matched", matched);
+                let _ = value.setattr("upper", upper);
+            }
+            CoreSemanticViolation::ContainsMinimumUnreachable {
+                constraint,
+                item_index,
+                processed,
+                matched,
+                lower,
+                ..
+            } => {
+                let _ = value.setattr("constraint", constraint.get());
+                let _ = value.setattr("item_index", item_index);
+                let _ = value.setattr("processed", processed);
+                let _ = value.setattr("matched", matched);
+                let _ = value.setattr("lower", lower);
+            }
+            CoreSemanticViolation::MissingCapture {
+                property, capture, ..
+            }
+            | CoreSemanticViolation::EqualityMismatch {
+                property, capture, ..
+            }
+            | CoreSemanticViolation::InequalityMismatch {
+                property, capture, ..
+            } => {
+                let _ = value.setattr("property", property.as_ref());
+                let _ = value.setattr("capture", capture.as_ref());
+            }
+            CoreSemanticViolation::ImportedMemberRequired {
+                property,
+                import_set,
+                ..
+            }
+            | CoreSemanticViolation::ImportedMemberForbidden {
+                property,
+                import_set,
+                ..
+            } => {
+                let _ = value.setattr("property", property.as_ref());
+                let _ = value.setattr("import_set", import_set.as_ref());
+            }
+        }
     });
     error
 }
@@ -90,33 +212,88 @@ impl PyCompiledSchema {
     }
 
     fn __repr__(&self) -> String {
+        let plan = self.inner.memory_plan();
+        let constraints = plan.unique_items().len()
+            + plan.contains_constraints().len()
+            + plan.object_extension_count();
         format!(
             "CompiledSchema(model_width={}, constraints={})",
             self.inner.token_table().model_width(),
-            self.inner.memory_plan().unique_items().len()
+            constraints
         )
     }
 }
 
-#[pyfunction(name = "compile_schema")]
+#[pyfunction(name = "compile_schema", signature = (schema_json, vocabulary, model_width, *, extensions_json=None))]
 fn compile_schema_py(
     py: Python<'_>,
     schema_json: &str,
     vocabulary: &PyVocabulary,
     model_width: usize,
+    extensions_json: Option<&str>,
 ) -> PyResult<PyCompiledSchema> {
     py.detach(|| {
+        let extension_plan = extensions_json
+            .map(ExtensionPlanV1::from_json)
+            .transpose()
+            .map_err(|error| CompileError::new_err(error.to_string()))?;
         oc_sidememory::compile_schema(
             schema_json.as_bytes(),
             &vocabulary.0,
             model_width,
-            &CompileOptions::default(),
+            &CompileOptions {
+                extension_plan,
+                ..CompileOptions::default()
+            },
         )
         .map(|compiled| PyCompiledSchema {
             inner: Arc::new(compiled),
         })
         .map_err(|error| CompileError::new_err(error.to_string()))
     })
+}
+
+#[pyclass(name = "ImportedMemory", module = "oc_sidememory._native", frozen)]
+pub struct PyImportedMemory {
+    inner: Arc<ImportedMemory>,
+}
+
+#[pymethods]
+impl PyImportedMemory {
+    #[staticmethod]
+    fn from_json(py: Python<'_>, identity: &str, version: &str, json_text: &str) -> PyResult<Self> {
+        py.detach(|| {
+            ImportedMemory::from_json(identity, version, json_text)
+                .map(|inner| Self {
+                    inner: Arc::new(inner),
+                })
+                .map_err(|error| match error {
+                    ImportError::Resource(_) => ResourceLimitError::new_err(error.to_string()),
+                    _ => PyValueError::new_err(error.to_string()),
+                })
+        })
+    }
+
+    fn get_identity(&self) -> &str {
+        self.inner.identity()
+    }
+
+    fn get_version(&self) -> &str {
+        self.inner.version()
+    }
+
+    fn get_set_count(&self) -> usize {
+        self.inner.set_count()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ImportedMemory(identity={:?}, version={:?}, sets={})",
+            self.inner.identity(),
+            self.inner.version(),
+            self.inner.set_count()
+        )
+    }
 }
 
 #[pyclass(name = "SidememoryGuide", module = "oc_sidememory._native")]
@@ -127,17 +304,25 @@ pub struct PySidememoryGuide {
 #[pymethods]
 impl PySidememoryGuide {
     #[new]
-    #[pyo3(signature = (compiled, max_rollback=32))]
-    fn __new__(compiled: &PyCompiledSchema, max_rollback: usize) -> PyResult<Self> {
-        Guide::new(
-            Arc::clone(&compiled.inner),
-            GuideOptions {
-                max_rollback_tokens: max_rollback,
-                ..GuideOptions::default()
-            },
-        )
-        .map(|inner| Self { inner })
-        .map_err(guide_error)
+    #[pyo3(signature = (compiled, max_rollback=32, *, imports=None))]
+    fn __new__(
+        compiled: &PyCompiledSchema,
+        max_rollback: usize,
+        imports: Option<&PyImportedMemory>,
+    ) -> PyResult<Self> {
+        let options = GuideOptions {
+            max_rollback_tokens: max_rollback,
+            ..GuideOptions::default()
+        };
+        let result = match imports {
+            Some(imports) => Guide::new_with_imports(
+                Arc::clone(&compiled.inner),
+                options,
+                Arc::clone(&imports.inner),
+            ),
+            None => Guide::new(Arc::clone(&compiled.inner), options),
+        };
+        result.map(|inner| Self { inner }).map_err(guide_error)
     }
 
     fn get_state(&self) -> StateId {
@@ -758,6 +943,7 @@ fn native_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyVocabulary>()?;
     m.add_class::<PyGuide>()?;
     m.add_class::<PyCompiledSchema>()?;
+    m.add_class::<PyImportedMemory>()?;
     m.add_class::<PySidememoryGuide>()?;
     m.add_function(wrap_pyfunction!(compile_schema_py, m)?)?;
     m.add("OcSidememoryError", m.py().get_type::<OcSidememoryError>())?;
