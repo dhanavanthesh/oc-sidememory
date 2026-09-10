@@ -8,4 +8,3 @@
 6. Rollback and semantic work are bounded by configured limits.
 7. Mask cost scales with candidates, token bytes, events, predicate work, and exact comparisons.
 8. Transformers examples require a cached pinned GPT-2 snapshot. They are demonstrations, not correctness oracles.
-9. No package-registry publication has been authorized.
