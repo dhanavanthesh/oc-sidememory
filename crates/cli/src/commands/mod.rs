@@ -44,7 +44,6 @@ fn capabilities() -> Value {
         "semantics": ["uniqueItems", "contains", "minContains", "maxContains", "capture", "equal", "notEqual", "memberOf", "notMemberOf"],
         "extensionVersions": [1],
         "liveGuideSerialization": false,
-        "publication": "not published",
     })
 }
 
