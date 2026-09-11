@@ -1,3 +1,6 @@
+// Relocated from outlines-core by OC-Sidememory contributors.
+// See the repository PROVENANCE.md and MODIFICATIONS.md.
+
 //! Parsing known locations in order to retrieve `eos_token_id` information.
 
 use hf_hub::api::sync::ApiBuilder;

@@ -1,3 +1,6 @@
+// Portions derived from outlines-core and modified by OC-Sidememory contributors.
+// See the repository PROVENANCE.md and MODIFICATIONS.md.
+
 //! Static collection of regular expressions for JSON and format types used
 //! in generating a regular expression string based on a given JSON schema.
 

@@ -1,3 +1,6 @@
+// Portions derived from outlines-core and modified by OC-Sidememory contributors.
+// See the repository PROVENANCE.md and MODIFICATIONS.md.
+
 //! Library's interface essentials.
 
 #[cfg(feature = "huggingface-hub")]

@@ -1,3 +1,6 @@
+// Portions derived from outlines-core and modified by OC-Sidememory contributors.
+// See the repository PROVENANCE.md and MODIFICATIONS.md.
+
 //! Building an `Index` to efficiently map vocabulary tokens to state transitions.
 
 use bincode::{Decode, Encode};

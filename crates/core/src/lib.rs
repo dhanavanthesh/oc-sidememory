@@ -1,4 +1,7 @@
-//! # Outlines_core
+// Portions derived from outlines-core and modified by OC-Sidememory contributors.
+// See the repository PROVENANCE.md and MODIFICATIONS.md.
+
+//! # OC-Sidememory
 //!
 //! `oc_sidememory` provides checked structured-generation foundations.
 //!

@@ -1,3 +1,6 @@
+// Portions derived from outlines-core and modified by OC-Sidememory contributors.
+// See the repository PROVENANCE.md and MODIFICATIONS.md.
+
 //! Provides tools and interfaces to integrate the crate's functionality with Python.
 
 use std::collections::VecDeque;

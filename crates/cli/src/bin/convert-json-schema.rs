@@ -1,3 +1,6 @@
+// Portions derived from outlines-core and modified by OC-Sidememory contributors.
+// See the repository PROVENANCE.md and MODIFICATIONS.md.
+
 use oc_sidememory::prelude::*;
 
 fn print_help() {

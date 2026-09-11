@@ -1,3 +1,6 @@
+// Portions derived from outlines-core and modified by OC-Sidememory contributors.
+// See the repository PROVENANCE.md and MODIFICATIONS.md.
+
 //! Post-processing operations for the tokens before they being inserted into
 //! `Vocabulary`, strategies depend on the tokenizer's level.
 
