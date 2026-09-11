@@ -1,5 +1,8 @@
 # Modifications
 
-Major changes from the imported outlines-core source include the checked schema IR and compiler, exact value representation, runtime routing, transactional semantic state, uniqueness, contains, ordered captures, immutable imported membership, rollback, tests, and benchmarks.
+Major changes include the checked schema compiler and IR, exact values, runtime routing,
+transactional semantic state, uniqueness, counted `contains`, ordered captures, immutable imported
+membership, rollback, tests, and benchmarks.
 
-Apache-2.0 remains in effect and the accompanying `NOTICE` retains upstream attribution.
+See `PROVENANCE.md` for inherited files. Apache-2.0 remains in effect and `NOTICE` retains
+attribution.

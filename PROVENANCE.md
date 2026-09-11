@@ -1,9 +1,19 @@
 # Provenance
 
-OC-Sidememory began from the Apache-2.0 source tree of [outlines-core](https://github.com/dottxt-ai/outlines-core) at commit `116a7c381b446814fdfc9b2b28bea7ca4f900aae`. The repository's initial commit records that imported tree; later commits record this project's work.
+OC-Sidememory was developed from an imported snapshot of `outlines-core`, licensed under Apache License 2.0.
 
-The complete Apache-2.0 license is retained and `NOTICE` preserves attribution. The fetch-only `upstream` Git remote exists for historical reference; pushes target OC-Sidememory's own repository.
+Upstream project:
 
-OC-Sidememory is independent and claims no upstream endorsement. Its checked compiler, exact canonical values, cursor, semantic router, transactional guide, histories, counters, registers, imports, rollback, CLI, and semantic Python interface were implemented here.
+- Repository: `dottxt-ai/outlines-core`
+- Imported commit: `116a7c381b446814fdfc9b2b28bea7ca4f900aae`
+- License: Apache-2.0
 
-Tests can consume a separately obtained pinned revision of the official JSON Schema Test Suite. That corpus and public example model weights are not distributed with the package.
+The original source tree was used as the structural decoding foundation.
+
+Files retained or modified from the upstream project contain notices pointing back to this document and `MODIFICATIONS.md`.
+
+OC-Sidememory-specific components, including the semantic-memory system, were developed after the import.
+
+OC-Sidememory is an independent project and is not endorsed by or affiliated with the Outlines or dottxt maintainers.
+
+See `NOTICE` and `LICENSE` for attribution and licensing information.

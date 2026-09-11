@@ -1,7 +1,23 @@
 # Modifications
 
-Upstream source: [dottxt-ai/outlines-core](https://github.com/dottxt-ai/outlines-core), commit `116a7c381b446814fdfc9b2b28bea7ca4f900aae`.
+OC-Sidememory extends and modifies the imported `outlines-core` source tree.
 
-Major changes include the checked compiler and IR, exact canonical values, cursor and router, semantic guide, histories, contains counters, captures, imported sets, rollback, Python bindings, CLI, tests, benchmarks, examples, and documentation.
+Major changes include:
 
-Apache-2.0 remains in effect and `NOTICE` retains attribution. This independent project is not endorsed by upstream.
+- reorganized the project into Rust core, Python, and CLI crates;
+- added schema compilation and semantic constraint handling;
+- added canonical JSON value representation and equality;
+- added `uniqueItems` history tracking;
+- added `contains`, `minContains`, and `maxContains` counters;
+- added captured values and cross-field relations;
+- added runtime imported membership sets;
+- added transactional probe, journal, checkpoint, and rollback support;
+- added semantic token-mask filtering;
+- added OC-Sidememory Python and Rust APIs;
+- added CLI commands, tests, examples, documentation, and benchmarks.
+
+Some original `outlines-core` files were retained, relocated, or modified. Those files include source-level notices identifying their origin.
+
+New OC-Sidememory semantic-memory modules were developed specifically for this project.
+
+For the exact upstream source, see `PROVENANCE.md`.
