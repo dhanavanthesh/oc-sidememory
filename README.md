@@ -1,3 +1,6 @@
+<!-- Portions derived from outlines-core and modified by OC-Sidememory contributors. -->
+<!-- See PROVENANCE.md and MODIFICATIONS.md. -->
+
 <div align="center">
 
 # OC-Sidememory

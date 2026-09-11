@@ -1,3 +1,6 @@
+<!-- Portions derived from outlines-core and modified by OC-Sidememory contributors. -->
+<!-- See PROVENANCE.md and MODIFICATIONS.md. -->
+
 # Release procedure
 
 Publishing requires explicit maintainer authorization and a clean commit whose version matches the proposed tag.

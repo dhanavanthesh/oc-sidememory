@@ -1,3 +1,5 @@
+# Portions derived from outlines-core and modified by OC-Sidememory contributors.
+# See PROVENANCE.md and MODIFICATIONS.md.
 # Optional target to test/benchmark.
 TARGET ?=
 TARPAULIN_INSTALLED := $(shell command -v cargo-tarpaulin > /dev/null && echo 1 || echo 0)
