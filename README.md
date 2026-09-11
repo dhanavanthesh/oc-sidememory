@@ -2,7 +2,9 @@
 
 # OC-Sidememory
 
-**Exact semantic memory for schema-constrained token generation in Rust and Python.**
+**Make an LLM remember semantic rules while it generates structured output.**
+
+Exact semantic memory for schema-constrained token generation in Rust and Python.
 
 [![PyPI](https://img.shields.io/pypi/v/oc-sidememory.svg)](https://pypi.org/project/oc-sidememory/)
 [![crates.io](https://img.shields.io/crates/v/oc-sidememory.svg)](https://crates.io/crates/oc-sidememory)
