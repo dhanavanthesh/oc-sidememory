@@ -1,3 +1,6 @@
+# Portions derived from outlines-core and modified by OC-Sidememory contributors.
+# See PROVENANCE.md and MODIFICATIONS.md.
+
 # Re-export from Rust extension
 from ._native import json_schema as _json_schema
 

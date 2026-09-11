@@ -1,3 +1,6 @@
+# Portions derived from outlines-core and modified by OC-Sidememory contributors.
+# See the repository PROVENANCE.md and MODIFICATIONS.md.
+
 # Provides kernels for masking a logits tensor,
 # using the write_into_mask method on the `Guide` object and the bitmask
 # which it writes into a tensor.
