@@ -1,3 +1,6 @@
+# Modified from outlines-core by OC-Sidememory contributors.
+# See PROVENANCE.md and MODIFICATIONS.md.
+
 """Tests for package imports to catch import/module registration issues."""
 
 
