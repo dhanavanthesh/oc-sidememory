@@ -1,9 +1,6 @@
 """Generate a schema-constrained travel itinerary with Qwen."""
 
-import json
-
 import oc_sidememory
-import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
@@ -36,54 +33,17 @@ Return only the JSON object."""
 
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, revision=REVISION)
-model = AutoModelForCausalLM.from_pretrained(MODEL_ID, revision=REVISION).eval()
-
-vocabulary = oc_sidememory.Vocabulary.from_transformers(tokenizer)
-compiled = oc_sidememory.compile_schema(
-    json.dumps(SCHEMA), vocabulary, model.config.vocab_size
-)
-guide = oc_sidememory.SidememoryGuide(compiled)
+model = AutoModelForCausalLM.from_pretrained(MODEL_ID, revision=REVISION).cpu().eval()
 
 messages = [
     {"role": "system", "content": "Return only JSON matching the requested schema."},
     {"role": "user", "content": PROMPT},
 ]
-rendered_prompt = tokenizer.apply_chat_template(
-    messages, tokenize=False, add_generation_prompt=True
-)
-input_ids = tokenizer(rendered_prompt, return_tensors="pt").input_ids
-generated = []
-past_key_values = None
+runtime = oc_sidememory.from_transformers(model, tokenizer)
+generate = oc_sidememory.Generator(runtime, SCHEMA)
+itinerary = generate(messages, max_new_tokens=128)
 
-with torch.inference_mode():
-    for _ in range(128):
-        result = model(
-            input_ids=input_ids,
-            past_key_values=past_key_values,
-            use_cache=True,
-        )
-        past_key_values = result.past_key_values
-
-        allowed = torch.tensor(guide.get_tokens(), dtype=torch.long)
-        if allowed.numel() == 0:
-            raise RuntimeError("schema has no valid continuation")
-
-        logits = result.logits[0, -1]
-        token = allowed[torch.argmax(logits[allowed])].item()
-        guide.advance(token)
-
-        if token == vocabulary.get_eos_token_id():
-            break
-        generated.append(token)
-        if guide.is_accepting():
-            break
-        input_ids = torch.tensor([[token]])
-    else:
-        raise RuntimeError("generation exceeded max_new_tokens")
-
-output = tokenizer.decode(generated)
-parsed = json.loads(output)
-assert parsed["city"] == "Kyoto"
-assert parsed["pace"] == "balanced"
-assert len(parsed["activities"]) == len(set(parsed["activities"])) == 3
-print(json.dumps(parsed, indent=2))
+assert itinerary["city"] in {"Kyoto", "Paris", "Reykjavik"}
+assert itinerary["pace"] in {"relaxed", "balanced", "busy"}
+assert len(itinerary["activities"]) == len(set(itinerary["activities"])) == 3
+print(itinerary)

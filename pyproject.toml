@@ -32,6 +32,13 @@ classifiers = [
 dynamic = ["version"]
 
 [project.optional-dependencies]
+transformers = [
+    "torch>=2.1",
+    "transformers>=4.42",
+]
+pydantic = [
+    "pydantic>=2",
+]
 # TODO: remove when numba is supported on the free-threaded build
 test-without-numba = [
     "pre-commit",

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Added `from_transformers` and `Generator` for reusable, parsed, batch-safe Hugging Face
+  generation from raw prompts or chat messages.
+- Added schema dictionaries, Pydantic-compatible output types, extension mappings, and imported
+  memory snapshot mappings to the high-level Python API.
+
 ## 0.1.0
 
 - Added checked schema compilation, exact canonical values, and validated token bytes.

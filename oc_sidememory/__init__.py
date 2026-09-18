@@ -6,8 +6,8 @@ import sys
 # kernels is not reexported as it should remain an optional dependency
 from . import _json_schema as json_schema
 from ._native import (
-    CompileError,
     CompiledSchema,
+    CompileError,
     Guide,
     ImportedMemory,
     Index,
@@ -22,10 +22,14 @@ from ._native import (
     Vocabulary,
     compile_schema,
 )
+from .generator import GenerationError, Generator
+from .runtime import Runtime, from_transformers
 
 __all__ = [
     "CompileError",
     "CompiledSchema",
+    "GenerationError",
+    "Generator",
     "Guide",
     "ImportedMemory",
     "Index",
@@ -34,12 +38,14 @@ __all__ = [
     "OcSidememoryError",
     "ResourceLimitError",
     "RollbackError",
+    "Runtime",
     "SemanticViolation",
     "SidememoryGuide",
     "StructuralRejection",
     "Vocabulary",
-    "compile_schema",
     "compat",
+    "compile_schema",
+    "from_transformers",
     "json_schema",
 ]
 

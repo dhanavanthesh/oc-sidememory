@@ -10,6 +10,9 @@ def test_import_oc_sidememory():
     assert hasattr(oc_sidememory, "Guide")
     assert hasattr(oc_sidememory, "Index")
     assert hasattr(oc_sidememory, "Vocabulary")
+    assert hasattr(oc_sidememory, "Generator")
+    assert hasattr(oc_sidememory, "Runtime")
+    assert hasattr(oc_sidememory, "from_transformers")
     assert hasattr(oc_sidememory, "json_schema")
 
 

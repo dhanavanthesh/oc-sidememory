@@ -137,7 +137,7 @@ pip install oc-sidememory
 For the model-backed walkthrough:
 
 ```bash
-pip install oc-sidememory transformers torch
+pip install "oc-sidememory[transformers]"
 ```
 
 Rust:
@@ -158,16 +158,13 @@ uv run maturin develop --release
 Qwen writes the plan. OC-Sidememory keeps the activities distinct.
 
 ```python
-import json
-
 import oc_sidememory
-import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-model = AutoModelForCausalLM.from_pretrained(MODEL_ID).eval()
+model = AutoModelForCausalLM.from_pretrained(MODEL_ID).cpu().eval()
 
 schema = {
     "type": "object",
@@ -197,22 +194,33 @@ messages = [
     {"role": "system", "content": "Return only JSON matching the requested schema."},
     {"role": "user", "content": prompt},
 ]
-text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-input_ids = tokenizer(text, return_tensors="pt").input_ids
 
-vocabulary = oc_sidememory.Vocabulary.from_transformers(tokenizer)
-compiled = oc_sidememory.compile_schema(
-    json.dumps(schema), vocabulary, model.config.vocab_size
-)
-guide = oc_sidememory.SidememoryGuide(compiled)
+runtime = oc_sidememory.from_transformers(model, tokenizer)
+generate = oc_sidememory.Generator(runtime, schema)
+itinerary = generate(messages, max_new_tokens=128)  # parsed dict, not JSON text
 ```
 
-The model-to-guide loop is shown once:
+The model, tokenizer vocabulary, and compiled schema are reused. Each call gets independent semantic
+state, so the same generator also accepts a batch of prompts or chats. Pass a Pydantic-compatible
+type instead of `schema` to receive a validated instance.
 
 <details>
-<summary>Show the complete Transformers decoding loop</summary>
+<summary>Advanced: compile and drive a guide yourself</summary>
+
+The facade uses the same public low-level objects. Use them directly when you need explicit probes,
+rollback, or control over token selection:
 
 ```python
+import json
+import torch
+
+text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+input_ids = tokenizer(text, return_tensors="pt").input_ids
+vocabulary = oc_sidememory.Vocabulary.from_transformers(tokenizer)
+compiled = oc_sidememory.compile_schema(
+    json.dumps(schema), vocabulary, model.get_output_embeddings().weight.shape[0]
+)
+guide = oc_sidememory.SidememoryGuide(compiled)
 
 generated = []
 past_key_values = None
@@ -243,7 +251,7 @@ with torch.inference_mode():
         raise RuntimeError("generation exceeded max_new_tokens")
 
 output = tokenizer.decode(generated)
-print(output)
+itinerary = json.loads(output)
 ```
 
 </details>
@@ -271,7 +279,7 @@ prompt -> model logits -> OC-Sidememory valid token IDs -> choose token
        -> advance model cache + semantic state -> repeat -> valid JSON
 ```
 
-Compile once per tokenizer/schema pair. Create one `SidememoryGuide` per sequence.
+`Generator` compiles once per tokenizer/schema pair and creates one `SidememoryGuide` per sequence.
 
 ## Compose stateful rules
 
@@ -331,16 +339,23 @@ extensions = {
     }],
 }
 
-imports = oc_sidememory.ImportedMemory.from_json(
-    "customer-snapshot", "catalog-v1", '{"live_customers":["cust_7","cust_9"]}'
+imports = {
+    "identity": "customer-snapshot",
+    "version": "catalog-v1",
+    "data": {"live_customers": ["cust_7", "cust_9"]},
+}
+generate_plan = oc_sidememory.Generator(
+    runtime, schema, extensions=extensions, imports=imports
 )
-compiled = oc_sidememory.compile_schema(
-    json.dumps(schema),
-    vocabulary,
-    model.config.vocab_size,
-    extensions_json=json.dumps(extensions),
-)
-guide = oc_sidememory.SidememoryGuide(compiled, imports=imports, max_rollback=32)
+plan_messages = [
+    {"role": "system", "content": "Return only JSON matching the requested schema."},
+    {
+        "role": "user",
+        "content": "Build an action plan for cust_7. Use search, compare, and answer exactly "
+                   "once, and repeat the numeric request ID in confirmation.",
+    },
+]
+plan = generate_plan(plan_messages, max_new_tokens=160)
 ```
 
 Run the complete model-backed version:
