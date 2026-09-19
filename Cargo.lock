@@ -940,7 +940,7 @@ checksum = "830b246a0e5f20af87141b25c173cd1b609bd7779a4617d6ec582abaf90870f3"
 
 [[package]]
 name = "oc-sidememory"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "bincode",
  "bitflags",
@@ -957,7 +957,7 @@ dependencies = [
 
 [[package]]
 name = "oc-sidememory-cli"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "oc-sidememory",
  "serde",
@@ -966,7 +966,7 @@ dependencies = [
 
 [[package]]
 name = "oc-sidememory-python"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "bincode",
  "oc-sidememory",

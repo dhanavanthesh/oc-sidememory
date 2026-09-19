@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.2
+
 - Added `from_transformers` and `Generator` for reusable, parsed, batch-safe Hugging Face
   generation from raw prompts or chat messages.
 - Added schema dictionaries, Pydantic-compatible output types, extension mappings, and imported
